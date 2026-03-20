@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
 
-const STAGES = ["New Lead","Contacted","Showing","Listing","Active Listing","Offer Made","Under Contract","Closed","Lost"];
+const STAGES = ["New Lead","Contacted","Showing","Listing","Active Listing","Offer Made","Under Contract","Inspection","Appraisal","Financing Contingency","Clear to Close","Closed","Lost"];
 const STAGE_COLORS = {
   "New Lead":"#3b82f6","Contacted":"#8b5cf6","Showing":"#f59e0b","Listing":"#ec4899","Active Listing":"#14b8a6",
-  "Offer Made":"#ef4444","Under Contract":"#10b981","Closed":"#059669","Lost":"#475569",
+  "Offer Made":"#ef4444","Under Contract":"#10b981","Inspection":"#f97316","Appraisal":"#eab308","Financing Contingency":"#06b6d4","Clear to Close":"#8b5cf6","Closed":"#059669","Lost":"#475569",
 };
 const LEAD_TYPES = ["Buyer","Seller","Buyer & Seller"];
 const TYPE_COLORS = { "Buyer":"#06b6d4","Seller":"#f97316","Buyer & Seller":"#a855f7" };
@@ -24,6 +24,36 @@ const calcCommission = (budget, commission) => { var b = parseBudget(budget); va
 const daysSince = (d) => Math.floor((new Date() - new Date(d)) / 86400000);
 const todayStr = () => new Date().toISOString().split("T")[0];
 const STORAGE_KEY = "re_pipeline_v4";
+
+
+function exportLeads(leads) {
+  var data = JSON.stringify(leads, null, 2);
+  var blob = new Blob([data], { type: "application/json" });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url;
+  a.download = "my-pipeline-leads-" + todayStr() + ".json";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importLeads(file, onSuccess) {
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      var data = JSON.parse(e.target.result);
+      if (Array.isArray(data)) {
+        onSuccess(data);
+        alert("Successfully imported " + data.length + " leads!");
+      } else {
+        alert("Invalid file format. Please use a file exported from Pipeline Pro.");
+      }
+    } catch(err) {
+      alert("Could not read file. Please try again.");
+    }
+  };
+  reader.readAsText(file);
+}
 
 function callAI(prompt) {
   return fetch("https://api.anthropic.com/v1/messages", {
@@ -346,7 +376,14 @@ export default function App() {
           return React.createElement("button", { key: k, onClick: function() { setView(k); }, style: { background: view === k ? "#1e293b" : "none", border: "none", color: view === k ? "#f1f5f9" : "#64748b", borderRadius: 8, padding: "7px 13px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" } }, label);
         })
       ),
+      React.createElement("div", { style: { display: "flex", gap: 8 } },
+      React.createElement("button", { onClick: function() { exportLeads(leads); }, style: { background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 10, padding: "9px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" } }, "⬇ Export"),
+      React.createElement("label", { style: { background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 10, padding: "9px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" } },
+        "⬆ Import",
+        React.createElement("input", { type: "file", accept: ".json", style: { display: "none" }, onChange: function(e) { if (e.target.files[0]) importLeads(e.target.files[0], function(data) { setLeads(data); }); } })
+      ),
       React.createElement("button", { onClick: function() { setShowAdd(true); }, style: { background: "linear-gradient(135deg,#3b82f6,#6366f1)", color: "#fff", border: "none", borderRadius: 10, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" } }, "+ Add Lead")
+    )
     ),
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 12, padding: "16px 24px", borderBottom: "1px solid #1e293b" } },
       [
@@ -565,4 +602,6 @@ export default function App() {
       )
     ) : null,
     selected ? React.createElement(LeadModal, { lead: selected, onClose: function() { setSelected(null); }, onUpdate: updateLead, onDelete: deleteLead }) : null
-  );}
+  );
+}
+                
