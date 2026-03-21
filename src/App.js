@@ -55,6 +55,126 @@ function importLeads(file, onSuccess) {
   reader.readAsText(file);
 }
 
+
+// ─── Supabase Config ──────────────────────────────────────────────────────────
+var SUPABASE_URL = "https://tjpjyltxxdoyfhtrxesu.supabase.co";
+var SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRqcGp5bHR4eGRveWZodHJ4ZXN1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI1NTYyOTUsImV4cCI6MjA1ODEzMjI5NX0.eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9";
+
+var sbHeaders = {
+  "Content-Type": "application/json",
+  "apikey": SUPABASE_KEY,
+  "Authorization": "Bearer " + SUPABASE_KEY,
+  "Prefer": "return=representation"
+};
+
+function sbFetch(path, options) {
+  return fetch(SUPABASE_URL + "/rest/v1/" + path, Object.assign({ headers: sbHeaders }, options || {}));
+}
+
+function loadLeadsFromDB(onSuccess, onError) {
+  sbFetch("leads?select=*&order=created_at.desc")
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (Array.isArray(data)) {
+        var leads = data.map(function(l) {
+          return Object.assign({}, l, {
+            tasks: l.tasks ? (typeof l.tasks === "string" ? JSON.parse(l.tasks) : l.tasks) : [],
+            attachments: l.attachments ? (typeof l.attachments === "string" ? JSON.parse(l.attachments) : l.attachments) : []
+          });
+        });
+        onSuccess(leads);
+      } else {
+        onError && onError(data);
+      }
+    })
+    .catch(onError || function() {});
+}
+
+function saveLeadToDB(lead, onSuccess, onError) {
+  var payload = Object.assign({}, lead, {
+    tasks: JSON.stringify(lead.tasks || []),
+    attachments: JSON.stringify(lead.attachments || [])
+  });
+  // Remove React-specific fields
+  delete payload.id_temp;
+
+  if (lead.db_id) {
+    // Update existing
+    sbFetch("leads?db_id=eq." + lead.db_id, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }).then(function(r) { return r.json(); })
+      .then(function(data) { onSuccess && onSuccess(Array.isArray(data) ? data[0] : data); })
+      .catch(onError || function() {});
+  } else {
+    // Insert new
+    sbFetch("leads", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }).then(function(r) { return r.json(); })
+      .then(function(data) { onSuccess && onSuccess(Array.isArray(data) ? data[0] : data); })
+      .catch(onError || function() {});
+  }
+}
+
+function deleteLeadFromDB(dbId, onSuccess, onError) {
+  sbFetch("leads?db_id=eq." + dbId, { method: "DELETE" })
+    .then(function() { onSuccess && onSuccess(); })
+    .catch(onError || function() {});
+}
+
+function upsertLeadToDB(lead, onSuccess, onError) {
+  var payload = {
+    name: lead.name || "",
+    type: lead.type || "Buyer",
+    phone: lead.phone || "",
+    email: lead.email || "",
+    stage: lead.stage || "New Lead",
+    property_interest: lead.propertyInterest || "",
+    source: lead.source || "",
+    budget: parseBudget(lead.budget) || 0,
+    commission: parseFloat(lead.commission) || 0,
+    notes: lead.notes || "",
+    last_contact: lead.lastContact || todayStr(),
+    ai_summary: lead.aiSummary || "",
+    tasks: JSON.stringify(lead.tasks || []),
+    attachments: JSON.stringify(lead.attachments || [])
+  };
+  if (lead.db_id) payload.db_id = lead.db_id;
+
+  sbFetch("leads", {
+    method: "POST",
+    headers: Object.assign({}, sbHeaders, { "Prefer": "return=representation,resolution=merge-duplicates" }),
+    body: JSON.stringify(payload)
+  }).then(function(r) { return r.json(); })
+    .then(function(data) {
+      var saved = Array.isArray(data) ? data[0] : data;
+      onSuccess && onSuccess(saved);
+    })
+    .catch(onError || function() {});
+}
+
+function dbToLead(r) {
+  return {
+    id: r.db_id || r.id || Date.now(),
+    db_id: r.db_id,
+    name: r.name || "",
+    type: r.type || "Buyer",
+    phone: r.phone || "",
+    email: r.email || "",
+    stage: r.stage || "New Lead",
+    propertyInterest: r.property_interest || "",
+    source: r.source || "",
+    budget: r.budget || 0,
+    commission: r.commission || 0,
+    notes: r.notes || "",
+    lastContact: r.last_contact || todayStr(),
+    aiSummary: r.ai_summary || "",
+    tasks: r.tasks ? (typeof r.tasks === "string" ? JSON.parse(r.tasks) : r.tasks) : [],
+    attachments: r.attachments ? (typeof r.attachments === "string" ? JSON.parse(r.attachments) : r.attachments) : []
+  };
+}
+
 function callAI(prompt) {
   return fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -319,10 +439,10 @@ function LeadCard(props) {
 }
 
 export default function App() {
-  var leadsState = React.useState(function() {
-    try { var s = localStorage.getItem(STORAGE_KEY); return s ? JSON.parse(s) : INITIAL_LEADS; } catch(e) { return INITIAL_LEADS; }
-  });
+  var leadsState = React.useState(INITIAL_LEADS);
   var leads = leadsState[0]; var setLeads = leadsState[1];
+  var dbLoadedState = React.useState(false); var dbLoaded = dbLoadedState[0]; var setDbLoaded = dbLoadedState[1];
+  var dbErrorState = React.useState(false); var dbError = dbErrorState[0]; var setDbError = dbErrorState[1];
   var selectedState = React.useState(null); var selected = selectedState[0]; var setSelected = selectedState[1];
   var showAddState = React.useState(false); var showAdd = showAddState[0]; var setShowAdd = showAddState[1];
   var viewState = React.useState("pipeline"); var view = viewState[0]; var setView = viewState[1];
@@ -334,15 +454,50 @@ export default function App() {
   var newLeadState = React.useState({ name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr() });
   var newLead = newLeadState[0]; var setNewLead = newLeadState[1];
 
-  React.useEffect(function() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(leads)); } catch(e) {} }, [leads]);
+  // Load from Supabase on mount
+  React.useEffect(function() {
+    sbFetch("leads?select=*&order=created_at.desc")
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (Array.isArray(data) && data.length > 0) {
+          setLeads(data.map(dbToLead));
+          setDbLoaded(true);
+        } else if (Array.isArray(data) && data.length === 0) {
+          setLeads([]);
+          setDbLoaded(true);
+        } else {
+          setDbError(true);
+          setDbLoaded(true);
+        }
+      })
+      .catch(function() { setDbError(true); setDbLoaded(true); });
+  }, []);
 
-  function updateLead(u) { setLeads(function(p) { return p.map(function(l) { return l.id === u.id ? u : l; }); }); }
-  function deleteLead(id) { setLeads(function(p) { return p.filter(function(l) { return l.id !== id; }); }); }
+  function updateLead(u) {
+    setLeads(function(p) { return p.map(function(l) { return l.id === u.id ? u : l; }); });
+    upsertLeadToDB(u, function(saved) {
+      if (saved && saved.db_id) {
+        setLeads(function(p) { return p.map(function(l) { return l.id === u.id ? Object.assign({}, u, { db_id: saved.db_id }) : l; }); });
+      }
+    });
+  }
+  function deleteLead(id) {
+    var lead = leads.find(function(l) { return l.id === id; });
+    setLeads(function(p) { return p.filter(function(l) { return l.id !== id; }); });
+    if (lead && lead.db_id) deleteLeadFromDB(lead.db_id);
+  }
   function addLead() {
     if (!newLead.name.trim()) return;
-    setLeads(function(p) { return [Object.assign({}, newLead, { id: Date.now(), budget: Number(newLead.budget) || 0, tasks: [], attachments: [], aiSummary: "" })].concat(p); });
+    var tempId = Date.now();
+    var newLeadObj = Object.assign({}, newLead, { id: tempId, budget: parseBudget(newLead.budget) || 0, commission: parseFloat(newLead.commission) || 3, tasks: [], attachments: [], aiSummary: "" });
+    setLeads(function(p) { return [newLeadObj].concat(p); });
     setShowAdd(false);
     setNewLead({ name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr() });
+    upsertLeadToDB(newLeadObj, function(saved) {
+      if (saved && saved.db_id) {
+        setLeads(function(p) { return p.map(function(l) { return l.id === tempId ? Object.assign({}, newLeadObj, { db_id: saved.db_id }) : l; }); });
+      }
+    });
   }
 
   var filtered = leads.filter(function(l) {
@@ -604,4 +759,4 @@ export default function App() {
     selected ? React.createElement(LeadModal, { lead: selected, onClose: function() { setSelected(null); }, onUpdate: updateLead, onDelete: deleteLead }) : null
   );
 }
-                
+  
