@@ -759,4 +759,3 @@ export default function App() {
     selected ? React.createElement(LeadModal, { lead: selected, onClose: function() { setSelected(null); }, onUpdate: updateLead, onDelete: deleteLead }) : null
   );
 }
-  
