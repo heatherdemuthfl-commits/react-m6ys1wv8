@@ -9,22 +9,25 @@ const LEAD_TYPES = ["Buyer","Seller","Buyer & Seller"];
 const TYPE_COLORS = { "Buyer":"#06b6d4","Seller":"#f97316","Buyer & Seller":"#a855f7" };
 const TYPE_ICONS = { "Buyer":"🏠","Seller":"🏷️","Buyer & Seller":"🔄" };
 
-const INITIAL_LEADS = [
-  { id:1, name:"Sarah & Tom Mitchell", type:"Buyer", phone:"386-555-0123", email:"mitchells@email.com", stage:"Showing", propertyInterest:"3BR Single Family, $380K-$430K", source:"Zillow", budget:430000, notes:"Pre-approved. Prefer Port Orange area.", commission:3, lastContact:"2026-03-18", aiSummary:"", tasks:[], attachments:[] },
-  { id:2, name:"David Nguyen", type:"Buyer", phone:"386-555-0456", email:"dnguyen@email.com", stage:"Offer Made", propertyInterest:"2BR Condo, $220K-$260K", source:"Referral", budget:260000, notes:"First-time buyer. Needs closing cost assistance.", commission:3, lastContact:"2026-03-19", aiSummary:"", tasks:[], attachments:[] },
-  { id:3, name:"Carla Reyes", type:"Seller", phone:"386-555-0789", email:"creyes@email.com", stage:"New Lead", propertyInterest:"4BR Pool Home, $500K+", source:"Instagram", budget:600000, notes:"Relocating from Miami in Q3.", commission:3, lastContact:"2026-03-15", aiSummary:"", tasks:[], attachments:[] },
-  { id:4, name:"James & Linda Park", type:"Buyer", phone:"386-555-0321", email:"parkfamily@email.com", stage:"Under Contract", propertyInterest:"3BR, $340K", source:"Open House", budget:350000, notes:"Close date: April 15. Inspection done.", commission:3, lastContact:"2026-03-20", aiSummary:"", tasks:[{id:"t1",text:"Send closing docs",done:false,due:"2026-03-25"}], attachments:[] },
-  { id:5, name:"Marcus Thompson", type:"Buyer & Seller", phone:"386-555-0654", email:"mthompson@email.com", stage:"Contacted", propertyInterest:"Investment duplex, $300K-$350K", source:"Website", budget:350000, notes:"Cash buyer. Looking for rental income.", commission:3, lastContact:"2026-03-17", aiSummary:"", tasks:[], attachments:[] },
-  { id:6, name:"Emily Foster", type:"Seller", phone:"386-555-0987", email:"efoster@email.com", stage:"Closed", propertyInterest:"2BR Townhouse, $280K", source:"Referral", budget:280000, notes:"Closed March 10. Very smooth transaction!", commission:3, lastContact:"2026-03-10", aiSummary:"", tasks:[], attachments:[] },
-];
+const STORAGE_KEY = "re_pipeline_v4";
+
+// ─── localStorage helpers ─────────────────────────────────────────────────────
+function saveToLocal(leads) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(leads)); } catch(e) {}
+}
+function loadFromLocal() {
+  try {
+    var raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) { var data = JSON.parse(raw); if (Array.isArray(data)) return data; }
+  } catch(e) {}
+  return null;
+}
 
 const parseBudget = (n) => { if (!n && n !== 0) return 0; var s = String(n).replace(/[$,\s]/g, ""); return parseFloat(s) || 0; };
 const fmt = (n) => { var v = parseBudget(n); return v ? "$" + v.toLocaleString() : "—"; };
 const calcCommission = (budget, commission) => { var b = parseBudget(budget); var c = parseFloat(commission) || 0; return b && c ? (b * c / 100) : 0; };
 const daysSince = (d) => Math.floor((new Date() - new Date(d)) / 86400000);
 const todayStr = () => new Date().toISOString().split("T")[0];
-const STORAGE_KEY = "re_pipeline_v4";
-
 
 function exportLeads(leads) {
   var data = JSON.stringify(leads, null, 2);
@@ -42,137 +45,11 @@ function importLeads(file, onSuccess) {
   reader.onload = function(e) {
     try {
       var data = JSON.parse(e.target.result);
-      if (Array.isArray(data)) {
-        onSuccess(data);
-        alert("Successfully imported " + data.length + " leads!");
-      } else {
-        alert("Invalid file format. Please use a file exported from Pipeline Pro.");
-      }
-    } catch(err) {
-      alert("Could not read file. Please try again.");
-    }
+      if (Array.isArray(data)) { onSuccess(data); alert("Successfully imported " + data.length + " leads!"); }
+      else alert("Invalid file format. Please use a file exported from Pipeline Pro.");
+    } catch(err) { alert("Could not read file. Please try again."); }
   };
   reader.readAsText(file);
-}
-
-
-// ─── Supabase Config ──────────────────────────────────────────────────────────
-var SUPABASE_URL = "https://tjpjyltxxdoyfhtrxesu.supabase.co";
-var SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRqcGp5bHR4eGRveWZodHJ4ZXN1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI1NTYyOTUsImV4cCI6MjA1ODEzMjI5NX0.eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9";
-
-var sbHeaders = {
-  "Content-Type": "application/json",
-  "apikey": SUPABASE_KEY,
-  "Authorization": "Bearer " + SUPABASE_KEY,
-  "Prefer": "return=representation"
-};
-
-function sbFetch(path, options) {
-  return fetch(SUPABASE_URL + "/rest/v1/" + path, Object.assign({ headers: sbHeaders }, options || {}));
-}
-
-function loadLeadsFromDB(onSuccess, onError) {
-  sbFetch("leads?select=*&order=created_at.desc")
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (Array.isArray(data)) {
-        var leads = data.map(function(l) {
-          return Object.assign({}, l, {
-            tasks: l.tasks ? (typeof l.tasks === "string" ? JSON.parse(l.tasks) : l.tasks) : [],
-            attachments: l.attachments ? (typeof l.attachments === "string" ? JSON.parse(l.attachments) : l.attachments) : []
-          });
-        });
-        onSuccess(leads);
-      } else {
-        onError && onError(data);
-      }
-    })
-    .catch(onError || function() {});
-}
-
-function saveLeadToDB(lead, onSuccess, onError) {
-  var payload = Object.assign({}, lead, {
-    tasks: JSON.stringify(lead.tasks || []),
-    attachments: JSON.stringify(lead.attachments || [])
-  });
-  // Remove React-specific fields
-  delete payload.id_temp;
-
-  if (lead.db_id) {
-    // Update existing
-    sbFetch("leads?db_id=eq." + lead.db_id, {
-      method: "PATCH",
-      body: JSON.stringify(payload)
-    }).then(function(r) { return r.json(); })
-      .then(function(data) { onSuccess && onSuccess(Array.isArray(data) ? data[0] : data); })
-      .catch(onError || function() {});
-  } else {
-    // Insert new
-    sbFetch("leads", {
-      method: "POST",
-      body: JSON.stringify(payload)
-    }).then(function(r) { return r.json(); })
-      .then(function(data) { onSuccess && onSuccess(Array.isArray(data) ? data[0] : data); })
-      .catch(onError || function() {});
-  }
-}
-
-function deleteLeadFromDB(dbId, onSuccess, onError) {
-  sbFetch("leads?db_id=eq." + dbId, { method: "DELETE" })
-    .then(function() { onSuccess && onSuccess(); })
-    .catch(onError || function() {});
-}
-
-function upsertLeadToDB(lead, onSuccess, onError) {
-  var payload = {
-    name: lead.name || "",
-    type: lead.type || "Buyer",
-    phone: lead.phone || "",
-    email: lead.email || "",
-    stage: lead.stage || "New Lead",
-    property_interest: lead.propertyInterest || "",
-    source: lead.source || "",
-    budget: parseBudget(lead.budget) || 0,
-    commission: parseFloat(lead.commission) || 0,
-    notes: lead.notes || "",
-    last_contact: lead.lastContact || todayStr(),
-    ai_summary: lead.aiSummary || "",
-    tasks: JSON.stringify(lead.tasks || []),
-    attachments: JSON.stringify(lead.attachments || [])
-  };
-  if (lead.db_id) payload.db_id = lead.db_id;
-
-  sbFetch("leads", {
-    method: "POST",
-    headers: Object.assign({}, sbHeaders, { "Prefer": "return=representation,resolution=merge-duplicates" }),
-    body: JSON.stringify(payload)
-  }).then(function(r) { return r.json(); })
-    .then(function(data) {
-      var saved = Array.isArray(data) ? data[0] : data;
-      onSuccess && onSuccess(saved);
-    })
-    .catch(onError || function() {});
-}
-
-function dbToLead(r) {
-  return {
-    id: r.db_id || r.id || Date.now(),
-    db_id: r.db_id,
-    name: r.name || "",
-    type: r.type || "Buyer",
-    phone: r.phone || "",
-    email: r.email || "",
-    stage: r.stage || "New Lead",
-    propertyInterest: r.property_interest || "",
-    source: r.source || "",
-    budget: r.budget || 0,
-    commission: r.commission || 0,
-    notes: r.notes || "",
-    lastContact: r.last_contact || todayStr(),
-    aiSummary: r.ai_summary || "",
-    tasks: r.tasks ? (typeof r.tasks === "string" ? JSON.parse(r.tasks) : r.tasks) : [],
-    attachments: r.attachments ? (typeof r.attachments === "string" ? JSON.parse(r.attachments) : r.attachments) : []
-  };
 }
 
 function callAI(prompt) {
@@ -203,13 +80,10 @@ function TypeBadge(props) {
 function TasksPanel(props) {
   var tasks = props.tasks;
   var onChange = props.onChange;
-  var newText = React.useState("")[0];
-  var setNewText = React.useState("")[1];
   var newTextState = React.useState("");
   var newDueState = React.useState("");
-  newText = newTextState[0]; setNewText = newTextState[1];
-  var newDue = newDueState[0];
-  var setNewDue = newDueState[1];
+  var newText = newTextState[0]; var setNewText = newTextState[1];
+  var newDue = newDueState[0]; var setNewDue = newDueState[1];
 
   function add() {
     if (!newText.trim()) return;
@@ -229,18 +103,15 @@ function TasksPanel(props) {
         React.createElement("input", { type: "checkbox", checked: t.done, onChange: function() { onChange(tasks.map(function(x) { return x.id === t.id ? Object.assign({}, x, {done: !x.done}) : x; })); }, style: { accentColor: "#10b981", width: 15, height: 15, cursor: "pointer" } }),
         React.createElement("div", { style: { flex: 1, fontSize: 13, color: t.done ? "#475569" : "#f1f5f9", textDecoration: t.done ? "line-through" : "none" } }, t.text),
         t.due ? React.createElement("span", { style: { fontSize: 11, color: "#64748b" } }, t.due) : null,
-        React.createElement("button", { onClick: function() { onChange(tasks.filter(function(x) { return x.id !== t.id; })); }, style: { background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 15 } }, "x")
+        React.createElement("button", { onClick: function() { onChange(tasks.filter(function(x) { return x.id !== t.id; })); }, style: { background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 15 } }, "×")
       );
     })
   );
 }
 
 function EmailModal(props) {
-  var lead = props.lead;
-  var onClose = props.onClose;
-  var subjectState = React.useState("");
-  var bodyState = React.useState("");
-  var loadingState = React.useState(true);
+  var lead = props.lead; var onClose = props.onClose;
+  var subjectState = React.useState(""); var bodyState = React.useState(""); var loadingState = React.useState(true);
   var subject = subjectState[0]; var setSubject = subjectState[1];
   var body = bodyState[0]; var setBody = bodyState[1];
   var loading = loadingState[0]; var setLoading = loadingState[1];
@@ -267,7 +138,7 @@ function EmailModal(props) {
     React.createElement("div", { style: { background: "#0d1117", border: "1px solid #1e293b", borderRadius: 20, width: "100%", maxWidth: 580, maxHeight: "90vh", overflowY: "auto", padding: 28, fontFamily: "inherit" } },
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { fontWeight: 800, fontSize: 18, color: "#f1f5f9" } }, "Email Draft"),
-        React.createElement("button", { onClick: onClose, style: { background: "none", border: "none", color: "#64748b", fontSize: 22, cursor: "pointer" } }, "x")
+        React.createElement("button", { onClick: onClose, style: { background: "none", border: "none", color: "#64748b", fontSize: 22, cursor: "pointer" } }, "×")
       ),
       loading
         ? React.createElement("div", { style: { textAlign: "center", padding: "40px 0", color: "#64748b" } }, "Drafting your email...")
@@ -337,7 +208,7 @@ function LeadModal(props) {
           ),
           React.createElement("div", { style: { display: "flex", gap: 8 } },
             React.createElement("button", { onClick: function() { setShowEmail(true); }, style: { background: "#3b82f6", color: "#fff", border: "none", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" } }, "Email"),
-            React.createElement("button", { onClick: onClose, style: { background: "none", border: "none", color: "#64748b", fontSize: 22, cursor: "pointer" } }, "x")
+            React.createElement("button", { onClick: onClose, style: { background: "none", border: "none", color: "#64748b", fontSize: 22, cursor: "pointer" } }, "×")
           )
         ),
         React.createElement("div", { style: { display: "flex", gap: 4, marginBottom: 20, borderBottom: "1px solid #1e293b" } },
@@ -439,10 +310,9 @@ function LeadCard(props) {
 }
 
 export default function App() {
-  var leadsState = React.useState(INITIAL_LEADS);
+  var leadsState = React.useState([]);
   var leads = leadsState[0]; var setLeads = leadsState[1];
-  var dbLoadedState = React.useState(false); var dbLoaded = dbLoadedState[0]; var setDbLoaded = dbLoadedState[1];
-  var dbErrorState = React.useState(false); var dbError = dbErrorState[0]; var setDbError = dbErrorState[1];
+  var loadedState = React.useState(false); var loaded = loadedState[0]; var setLoaded = loadedState[1];
   var selectedState = React.useState(null); var selected = selectedState[0]; var setSelected = selectedState[1];
   var showAddState = React.useState(false); var showAdd = showAddState[0]; var setShowAdd = showAddState[1];
   var viewState = React.useState("pipeline"); var view = viewState[0]; var setView = viewState[1];
@@ -454,54 +324,38 @@ export default function App() {
   var newLeadState = React.useState({ name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr() });
   var newLead = newLeadState[0]; var setNewLead = newLeadState[1];
 
-  // Load from Supabase on mount
+  // ── Load from localStorage on first mount ──────────────────────────────────
   React.useEffect(function() {
-    sbFetch("leads?select=*&order=created_at.desc")
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        if (Array.isArray(data) && data.length > 0) {
-          setLeads(data.map(dbToLead));
-          setDbLoaded(true);
-        } else if (Array.isArray(data) && data.length === 0) {
-          setLeads([]);
-          setDbLoaded(true);
-        } else {
-          setDbError(true);
-          setDbLoaded(true);
-        }
-      })
-      .catch(function() { setDbError(true); setDbLoaded(true); });
+    var saved = loadFromLocal();
+    if (saved && saved.length > 0) {
+      setLeads(saved);
+    }
+    setLoaded(true);
   }, []);
+
+  // ── Save to localStorage whenever leads change (after initial load) ─────────
+  React.useEffect(function() {
+    if (loaded) {
+      saveToLocal(leads);
+    }
+  }, [leads, loaded]);
 
   function updateLead(u) {
     setLeads(function(p) { return p.map(function(l) { return l.id === u.id ? u : l; }); });
-    upsertLeadToDB(u, function(saved) {
-      if (saved && saved.db_id) {
-        setLeads(function(p) { return p.map(function(l) { return l.id === u.id ? Object.assign({}, u, { db_id: saved.db_id }) : l; }); });
-      }
-    });
   }
   function deleteLead(id) {
-    var lead = leads.find(function(l) { return l.id === id; });
     setLeads(function(p) { return p.filter(function(l) { return l.id !== id; }); });
-    if (lead && lead.db_id) deleteLeadFromDB(lead.db_id);
   }
   function addLead() {
     if (!newLead.name.trim()) return;
-    var tempId = Date.now();
-    var newLeadObj = Object.assign({}, newLead, { id: tempId, budget: parseBudget(newLead.budget) || 0, commission: parseFloat(newLead.commission) || 3, tasks: [], attachments: [], aiSummary: "" });
+    var newLeadObj = Object.assign({}, newLead, { id: Date.now(), budget: parseBudget(newLead.budget) || 0, commission: parseFloat(newLead.commission) || 3, tasks: [], attachments: [], aiSummary: "" });
     setLeads(function(p) { return [newLeadObj].concat(p); });
     setShowAdd(false);
     setNewLead({ name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr() });
-    upsertLeadToDB(newLeadObj, function(saved) {
-      if (saved && saved.db_id) {
-        setLeads(function(p) { return p.map(function(l) { return l.id === tempId ? Object.assign({}, newLeadObj, { db_id: saved.db_id }) : l; }); });
-      }
-    });
   }
 
   var filtered = leads.filter(function(l) {
-    return (l.name.toLowerCase().indexOf(search.toLowerCase()) > -1 || l.propertyInterest.toLowerCase().indexOf(search.toLowerCase()) > -1) &&
+    return (l.name.toLowerCase().indexOf(search.toLowerCase()) > -1 || (l.propertyInterest || "").toLowerCase().indexOf(search.toLowerCase()) > -1) &&
       (stageFilter === "All" || l.stage === stageFilter) &&
       (typeFilter === "All Types" || l.type === typeFilter);
   });
@@ -517,6 +371,7 @@ export default function App() {
   var iStyle = { width: "100%", background: "#111827", border: "1px solid #1e293b", borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" };
 
   return React.createElement("div", { style: { minHeight: "100vh", background: "#060b14", fontFamily: "'Segoe UI',sans-serif", color: "#f1f5f9" } },
+    // ── Header ──────────────────────────────────────────────────────────────
     React.createElement("div", { style: { borderBottom: "1px solid #1e293b", padding: "14px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#0d1117", flexWrap: "wrap", gap: 10 } },
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
         React.createElement("div", { style: { width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg,#3b82f6,#6366f1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 } }, "🏡"),
@@ -532,14 +387,15 @@ export default function App() {
         })
       ),
       React.createElement("div", { style: { display: "flex", gap: 8 } },
-      React.createElement("button", { onClick: function() { exportLeads(leads); }, style: { background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 10, padding: "9px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" } }, "⬇ Export"),
-      React.createElement("label", { style: { background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 10, padding: "9px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" } },
-        "⬆ Import",
-        React.createElement("input", { type: "file", accept: ".json", style: { display: "none" }, onChange: function(e) { if (e.target.files[0]) importLeads(e.target.files[0], function(data) { setLeads(data); }); } })
-      ),
-      React.createElement("button", { onClick: function() { setShowAdd(true); }, style: { background: "linear-gradient(135deg,#3b82f6,#6366f1)", color: "#fff", border: "none", borderRadius: 10, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" } }, "+ Add Lead")
-    )
+        React.createElement("button", { onClick: function() { exportLeads(leads); }, style: { background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 10, padding: "9px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" } }, "⬇ Export"),
+        React.createElement("label", { style: { background: "#1e293b", color: "#94a3b8", border: "1px solid #334155", borderRadius: 10, padding: "9px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" } },
+          "⬆ Import",
+          React.createElement("input", { type: "file", accept: ".json", style: { display: "none" }, onChange: function(e) { if (e.target.files[0]) importLeads(e.target.files[0], function(data) { setLeads(data); }); } })
+        ),
+        React.createElement("button", { onClick: function() { setShowAdd(true); }, style: { background: "linear-gradient(135deg,#3b82f6,#6366f1)", color: "#fff", border: "none", borderRadius: 10, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" } }, "+ Add Lead")
+      )
     ),
+    // ── Stats bar ────────────────────────────────────────────────────────────
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 12, padding: "16px 24px", borderBottom: "1px solid #1e293b" } },
       [
         { label: "Active Leads", value: activeLeads, color: "#3b82f6", icon: "👥" },
@@ -556,8 +412,19 @@ export default function App() {
         );
       })
     ),
+    // ── Main content ─────────────────────────────────────────────────────────
     React.createElement("div", { style: { padding: "20px 24px" } },
-      view === "pipeline" ? React.createElement("div", null,
+      // Empty state
+      !loaded ? React.createElement("div", { style: { textAlign: "center", padding: "60px 0", color: "#64748b" } }, "Loading...") :
+      leads.length === 0 && view === "pipeline" ? React.createElement("div", { style: { textAlign: "center", padding: "80px 24px" } },
+        React.createElement("div", { style: { fontSize: 48, marginBottom: 16 } }, "🏡"),
+        React.createElement("div", { style: { fontSize: 20, fontWeight: 700, color: "#f1f5f9", marginBottom: 8 } }, "Your pipeline is ready!"),
+        React.createElement("div", { style: { fontSize: 14, color: "#64748b", marginBottom: 24 } }, "Add your first lead to get started."),
+        React.createElement("button", { onClick: function() { setShowAdd(true); }, style: { background: "linear-gradient(135deg,#3b82f6,#6366f1)", color: "#fff", border: "none", borderRadius: 10, padding: "12px 28px", fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" } }, "+ Add Your First Lead")
+      ) : null,
+
+      // Pipeline view
+      view === "pipeline" && leads.length > 0 ? React.createElement("div", null,
         React.createElement("div", { style: { display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" } },
           React.createElement("input", { value: search, onChange: function(e) { setSearch(e.target.value); }, placeholder: "Search leads...", style: Object.assign({}, iStyle, { flex: 1, minWidth: 160 }) }),
           React.createElement("select", { value: stageFilter, onChange: function(e) { setStageFilter(e.target.value); }, style: { background: "#0d1117", border: "1px solid #1e293b", borderRadius: 10, color: "#f1f5f9", padding: "9px 14px", fontSize: 13, fontFamily: "inherit" } },
@@ -585,8 +452,11 @@ export default function App() {
           })
         )
       ) : null,
+
+      // Contacts view
       view === "contacts" ? React.createElement("div", null,
         React.createElement("input", { value: search, onChange: function(e) { setSearch(e.target.value); }, placeholder: "Search...", style: Object.assign({}, iStyle, { marginBottom: 16 }) }),
+        leads.length === 0 ? React.createElement("div", { style: { textAlign: "center", padding: "40px 0", color: "#64748b" } }, "No leads yet. Add one from the Pipeline tab!") :
         React.createElement("div", { style: { background: "#0d1117", borderRadius: 14, border: "1px solid #1e293b", overflow: "hidden" } },
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "2fr 1.5fr 1fr 1fr 1fr 80px", padding: "10px 16px", borderBottom: "1px solid #1e293b", fontSize: 11, color: "#64748b", fontWeight: 700, textTransform: "uppercase" } },
             ["Contact","Interest","Budget","Stage / Type","Last Contact",""].map(function(h) { return React.createElement("div", { key: h }, h); })
@@ -609,6 +479,8 @@ export default function App() {
           })
         )
       ) : null,
+
+      // Reminders view
       view === "reminders" ? React.createElement("div", null,
         (function() {
           var allTasks = leads.reduce(function(acc, l) { return acc.concat((l.tasks || []).filter(function(t) { return !t.done; }).map(function(t) { return Object.assign({}, t, { leadName: l.name, lead: l }); })); }, []);
@@ -656,6 +528,8 @@ export default function App() {
           );
         })()
       ) : null,
+
+      // Forecast view
       view === "forecast" ? React.createElement("div", null,
         React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 20 } },
           LEAD_TYPES.map(function(type) {
@@ -709,10 +583,12 @@ export default function App() {
           ),
           aiReport
             ? React.createElement("div", { style: { background: "#111827", borderRadius: 10, padding: 16, fontSize: 14, color: "#cbd5e1", lineHeight: 1.8, whiteSpace: "pre-wrap", border: "1px solid #1e293b" } }, aiReport)
-            : React.createElement("div", { style: { textAlign: "center", padding: "30px 0", color: "#334155", fontSize: 13 } }, "Click Generate Report for AI insights")
+            : React.createElement("div", { style: { textAlign: "center", padding: "30px 0", color: "#334155", fontSize: 13 } }, leads.length === 0 ? "Add leads first, then generate a report." : "Click Generate Report for AI insights")
         )
       ) : null
     ),
+
+    // ── Add Lead modal ────────────────────────────────────────────────────────
     showAdd ? React.createElement("div", {
       style: { position: "fixed", inset: 0, background: "#000000aa", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 },
       onClick: function(e) { if (e.target === e.currentTarget) setShowAdd(false); }
@@ -756,6 +632,8 @@ export default function App() {
         )
       )
     ) : null,
+
+    // ── Lead detail modal ─────────────────────────────────────────────────────
     selected ? React.createElement(LeadModal, { lead: selected, onClose: function() { setSelected(null); }, onUpdate: updateLead, onDelete: deleteLead }) : null
   );
 }
