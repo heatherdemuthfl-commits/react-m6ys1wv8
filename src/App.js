@@ -11,7 +11,7 @@ const TYPE_ICONS = { "Buyer":"🏠","Seller":"🏷️","Buyer & Seller":"🔄" }
 
 const STORAGE_KEY = "re_pipeline_v4";
 
-// ─── localStorage helpers ─────────────────────────────────────────────────────
+// ─── localStorage fallback ────────────────────────────────────────────────────
 function saveToLocal(leads) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(leads)); } catch(e) {}
 }
@@ -21,6 +21,67 @@ function loadFromLocal() {
     if (raw) { var data = JSON.parse(raw); if (Array.isArray(data)) return data; }
   } catch(e) {}
   return null;
+}
+
+// ─── Supabase config ──────────────────────────────────────────────────────────
+var SUPABASE_URL = "https://tjpjyltxxdoyfhtrxesu.supabase.co";
+var SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRqcGp5bHR4eGRveWZodHJ4ZXN1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwNjg2MDcsImV4cCI6MjA4OTY0NDYwN30.JTNgTmMOAECGS-aPbf-GusoKWbJ8AT1R0xA8lc13QRo";
+var sbHeaders = {
+  "Content-Type": "application/json",
+  "apikey": SUPABASE_KEY,
+  "Authorization": "Bearer " + SUPABASE_KEY,
+  "Prefer": "return=representation"
+};
+function sbFetch(path, options) {
+  return fetch(SUPABASE_URL + "/rest/v1/" + path, Object.assign({ headers: sbHeaders }, options || {}));
+}
+function dbToLead(r) {
+  return {
+    id: r.db_id || r.id || Date.now(),
+    db_id: r.db_id,
+    name: r.name || "",
+    type: r.type || "Buyer",
+    phone: r.phone || "",
+    email: r.email || "",
+    stage: r.stage || "New Lead",
+    propertyInterest: r.property_interest || "",
+    source: r.source || "",
+    budget: r.budget || 0,
+    commission: r.commission || 3,
+    notes: r.notes || "",
+    lastContact: r.last_contact || todayStr(),
+    aiSummary: r.ai_summary || "",
+    tasks: r.tasks ? (typeof r.tasks === "string" ? JSON.parse(r.tasks) : r.tasks) : [],
+    attachments: []
+  };
+}
+function upsertLeadToDB(lead, onSuccess, onError) {
+  var payload = {
+    name: lead.name || "",
+    type: lead.type || "Buyer",
+    phone: lead.phone || "",
+    email: lead.email || "",
+    stage: lead.stage || "New Lead",
+    property_interest: lead.propertyInterest || "",
+    source: lead.source || "",
+    budget: parseBudget(lead.budget) || 0,
+    commission: parseFloat(lead.commission) || 3,
+    notes: lead.notes || "",
+    last_contact: lead.lastContact || todayStr(),
+    ai_summary: lead.aiSummary || "",
+    tasks: JSON.stringify(lead.tasks || [])
+  };
+  if (lead.db_id) payload.db_id = lead.db_id;
+  sbFetch("leads", {
+    method: "POST",
+    headers: Object.assign({}, sbHeaders, { "Prefer": "return=representation,resolution=merge-duplicates" }),
+    body: JSON.stringify(payload)
+  }).then(function(r) { return r.json(); })
+    .then(function(data) { onSuccess && onSuccess(Array.isArray(data) ? data[0] : data); })
+    .catch(onError || function() {});
+}
+function deleteLeadFromDB(dbId) {
+  sbFetch("leads?db_id=eq." + dbId, { method: "DELETE" }).catch(function() {});
 }
 
 const parseBudget = (n) => { if (!n && n !== 0) return 0; var s = String(n).replace(/[$,\s]/g, ""); return parseFloat(s) || 0; };
@@ -324,34 +385,64 @@ export default function App() {
   var newLeadState = React.useState({ name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr() });
   var newLead = newLeadState[0]; var setNewLead = newLeadState[1];
 
-  // ── Load from localStorage on first mount ──────────────────────────────────
+  // ── Load from Supabase on mount, fall back to localStorage ─────────────────
   React.useEffect(function() {
-    var saved = loadFromLocal();
-    if (saved && saved.length > 0) {
-      setLeads(saved);
-    }
-    setLoaded(true);
+    sbFetch("leads?select=*&order=created_at.desc")
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (Array.isArray(data) && data.length > 0) {
+          var mapped = data.map(dbToLead);
+          setLeads(mapped);
+          saveToLocal(mapped);
+        } else if (Array.isArray(data) && data.length === 0) {
+          var local = loadFromLocal();
+          if (local && local.length > 0) {
+            setLeads(local);
+            local.forEach(function(l) { upsertLeadToDB(l); });
+          }
+        } else {
+          var local2 = loadFromLocal();
+          if (local2) setLeads(local2);
+        }
+        setLoaded(true);
+      })
+      .catch(function() {
+        var local3 = loadFromLocal();
+        if (local3) setLeads(local3);
+        setLoaded(true);
+      });
   }, []);
 
-  // ── Save to localStorage whenever leads change (after initial load) ─────────
+  // ── Keep localStorage in sync as backup ─────────────────────────────────────
   React.useEffect(function() {
-    if (loaded) {
-      saveToLocal(leads);
-    }
+    if (loaded) saveToLocal(leads);
   }, [leads, loaded]);
 
   function updateLead(u) {
     setLeads(function(p) { return p.map(function(l) { return l.id === u.id ? u : l; }); });
+    upsertLeadToDB(u, function(saved) {
+      if (saved && saved.db_id) {
+        setLeads(function(p) { return p.map(function(l) { return l.id === u.id ? Object.assign({}, u, { db_id: saved.db_id }) : l; }); });
+      }
+    });
   }
   function deleteLead(id) {
+    var lead = leads.find(function(l) { return l.id === id; });
     setLeads(function(p) { return p.filter(function(l) { return l.id !== id; }); });
+    if (lead && lead.db_id) deleteLeadFromDB(lead.db_id);
   }
   function addLead() {
     if (!newLead.name.trim()) return;
-    var newLeadObj = Object.assign({}, newLead, { id: Date.now(), budget: parseBudget(newLead.budget) || 0, commission: parseFloat(newLead.commission) || 3, tasks: [], attachments: [], aiSummary: "" });
+    var tempId = Date.now();
+    var newLeadObj = Object.assign({}, newLead, { id: tempId, budget: parseBudget(newLead.budget) || 0, commission: parseFloat(newLead.commission) || 3, tasks: [], attachments: [], aiSummary: "" });
     setLeads(function(p) { return [newLeadObj].concat(p); });
     setShowAdd(false);
     setNewLead({ name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr() });
+    upsertLeadToDB(newLeadObj, function(saved) {
+      if (saved && saved.db_id) {
+        setLeads(function(p) { return p.map(function(l) { return l.id === tempId ? Object.assign({}, newLeadObj, { db_id: saved.db_id }) : l; }); });
+      }
+    });
   }
 
   var filtered = leads.filter(function(l) {
