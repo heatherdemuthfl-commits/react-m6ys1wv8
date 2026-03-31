@@ -538,15 +538,20 @@ function LeadModal(props) {
 function LeadCard(props) {
   var lead = props.lead; var onSelect = props.onSelect;
   var onDragStart = props.onDragStart; var onDragEnd = props.onDragEnd;
+  var onMoveTo = props.onMoveTo;
   var days = daysSince(lead.lastContact);
   var urgent = false; // follow-up alerts removed
   var openTasks = (lead.tasks || []).filter(function(t) { return !t.done; }).length;
-  return React.createElement("div", {
+  var showMoveState = React.useState(false); var showMove = showMoveState[0]; var setShowMove = showMoveState[1];
+  var isTouchDevice = typeof window !== "undefined" && ("ontouchstart" in window || navigator.maxTouchPoints > 0);
+
+  return React.createElement("div", { style: { position: "relative", marginBottom: 9 } },
+    React.createElement("div", {
     onClick: function() { onSelect(lead); },
-    draggable: true,
-    onDragStart: function(e) { e.stopPropagation(); onDragStart(lead); },
+    draggable: !isTouchDevice,
+    onDragStart: function(e) { if (!isTouchDevice) { e.stopPropagation(); onDragStart(lead); } },
     onDragEnd: onDragEnd,
-    style: { background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12, padding: "13px 15px", cursor: "grab", marginBottom: 9, position: "relative", overflow: "hidden" },
+    style: { background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12, padding: "13px 15px", cursor: isTouchDevice ? "pointer" : "grab", position: "relative", overflow: "hidden" },
     onMouseEnter: function(e) { e.currentTarget.style.borderColor = STAGE_COLORS[lead.stage] + "70"; },
     onMouseLeave: function(e) { e.currentTarget.style.borderColor = "#1e293b"; }
   },
@@ -574,6 +579,29 @@ function LeadCard(props) {
         )
       )
     )
+    ),
+    ),
+    isTouchDevice ? React.createElement("button", {
+      onClick: function(e) { e.stopPropagation(); setShowMove(function(v) { return !v; }); },
+      style: { position: "absolute", top: 8, right: 8, background: "#1e293b", border: "none", borderRadius: 6, color: "#94a3b8", fontSize: 11, padding: "3px 8px", cursor: "pointer", fontFamily: "inherit", zIndex: 10 }
+    }, "Move ▾") : null,
+    showMove ? React.createElement("div", {
+      style: { position: "absolute", right: 0, top: 32, background: "#0d1117", border: "1px solid #1e293b", borderRadius: 10, zIndex: 100, minWidth: 200, boxShadow: "0 4px 20px #00000080", padding: "6px 0" }
+    },
+      React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, padding: "4px 14px 6px", textTransform: "uppercase" } }, "Move to..."),
+      STAGES.filter(function(s) { return s !== lead.stage; }).map(function(s) {
+        return React.createElement("div", {
+          key: s,
+          onClick: function(e) { e.stopPropagation(); onMoveTo(lead, s); setShowMove(false); },
+          style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer", fontSize: 13, color: "#f1f5f9" },
+          onMouseEnter: function(e) { e.currentTarget.style.background = "#1e293b"; },
+          onMouseLeave: function(e) { e.currentTarget.style.background = "transparent"; }
+        },
+          React.createElement("div", { style: { width: 8, height: 8, borderRadius: "50%", background: STAGE_COLORS[s], flexShrink: 0 } }),
+          s
+        );
+      })
+    ) : null
   );
 }
 
@@ -693,6 +721,10 @@ export default function App() {
     setDragOver(null);
   }
   function handleDragEnd() { setDragLead(null); setDragOver(null); }
+  function handleMoveTo(lead, stage) {
+    var updated = Object.assign({}, lead, { stage: stage });
+    updateLead(updated);
+  }
 
   var filtered = leads.filter(function(l) {
     return (l.name.toLowerCase().indexOf(search.toLowerCase()) > -1 || (l.propertyInterest || "").toLowerCase().indexOf(search.toLowerCase()) > -1) &&
