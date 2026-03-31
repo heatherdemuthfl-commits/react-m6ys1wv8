@@ -577,14 +577,14 @@ export default function App() {
   var potentialLeadsList = leads.filter(function(l) { return l.stage === "New Lead" || l.stage === "Contacted"; });
   var totalPipeline = activeLeadsList.reduce(function(s,l) { return s + parseBudget(l.budget); }, 0);
   var potentialPipeline = potentialLeadsList.reduce(function(s,l) { return s + parseBudget(l.budget); }, 0);
-  var closedRevenue = leads.filter(function(l) { return l.stage === "Closed"; }).reduce(function(s,l) { return s + parseBudget(l.budget); }, 0);
+  var closedRevenue = closedLeads.reduce(function(s,l) { return s + parseBudget(l.budget); }, 0);
   var activeLeads = activeLeadsList.length;
   var urgentLeads = leads.filter(function(l) { return daysSince(l.lastContact) >= 3 && l.stage !== "Closed - Cap Year" && l.stage !== "Closed - Current Year" && l.stage !== "Lost"; }).length;
   var allOpenTasks = leads.reduce(function(acc, l) { return acc.concat((l.tasks || []).filter(function(t) { return !t.done; })); }, []);
   var overdueTasks = allOpenTasks.filter(function(t) { return t.due && new Date(t.due) < new Date(); }).length;
   var potentialIncome = activeLeadsList.reduce(function(s,l) { return s + calcCommission(l.budget, l.commission); }, 0);
-  var earnedIncome = leads.filter(function(l) { return l.stage === "Closed"; }).reduce(function(s,l) { return s + calcCommission(l.budget, l.commission); }, 0);
-  var actualEarned = leads.filter(function(l) { return l.stage === "Closed"; }).reduce(function(s,l) { return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, l.agentReferralPaid, l.commissionBonus, l.incomingReferral, l.referralOnly); }, 0);
+  var earnedIncome = closedLeads.reduce(function(s,l) { return s + calcCommission(l.budget, l.commission) + (parseFloat(l.commissionBonus) || 0) + (parseFloat(l.incomingReferral) || 0); }, 0);
+  var actualEarned = closedLeads.reduce(function(s,l) { return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, l.agentReferralPaid, l.commissionBonus, l.incomingReferral, l.referralOnly); }, 0);
   // Date helpers for cap year (July 1 - June 30) and calendar year (Jan 1 - Dec 31)
   var now = new Date();
   var capYearStart = now.getMonth() >= 6
