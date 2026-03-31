@@ -55,7 +55,11 @@ function dbToLead(r) {
     attachments: [],
     applyplit: r.applyplit || false,
     splitPaid: r.split_paid || 0,
-    otherFees: r.other_fees || 0
+    otherFees: r.other_fees || 0,
+    cbrFee: r.cbr_fee || false,
+    transactionFee: r.transaction_fee || false,
+    tcFee: r.tc_fee || 0,
+    preCapEquity: r.pre_cap_equity || 0
   };
 }
 function upsertLeadToDB(lead, onSuccess, onError) {
@@ -75,7 +79,11 @@ function upsertLeadToDB(lead, onSuccess, onError) {
     tasks: JSON.stringify(lead.tasks || []),
     applyplit: lead.applyplit || false,
     split_paid: parseFloat(lead.splitPaid) || 0,
-    other_fees: parseFloat(lead.otherFees) || 0
+    other_fees: parseFloat(lead.otherFees) || 0,
+    cbr_fee: lead.cbrFee || false,
+    transaction_fee: lead.transactionFee || false,
+    tc_fee: parseFloat(lead.tcFee) || 0,
+    pre_cap_equity: parseFloat(lead.preCapEquity) || 0
   };
   if (lead.db_id) payload.db_id = lead.db_id;
   sbFetch("leads", {
@@ -94,10 +102,14 @@ const parseBudget = (n) => { if (!n && n !== 0) return 0; var s = String(n).repl
 const fmt = (n) => { var v = parseBudget(n); return v ? "$" + v.toLocaleString() : "—"; };
 const calcCommission = (budget, commission) => { var b = parseBudget(budget); var c = parseFloat(commission) || 0; return b && c ? (b * c / 100) : 0; };
 
-const calcActualIncome = (budget, commission, applyplit, splitPaid, otherFees) => {
+const calcActualIncome = (budget, commission, applyplit, splitPaid, otherFees, cbrFee, transactionFee, tcFee, preCapEquity) => {
   var gross = calcCommission(budget, commission);
   var splitAmt = applyplit ? Math.min(gross * 0.15, Math.max(0, 12000 - (parseFloat(splitPaid) || 0))) : 0;
-  var fees = parseFloat(otherFees) || 0;
+  var fees = (parseFloat(otherFees) || 0)
+    + (cbrFee ? 40 : 0)
+    + (transactionFee ? 285 : 0)
+    + (parseFloat(tcFee) || 0)
+    + (parseFloat(preCapEquity) || 0);
   return Math.max(gross - splitAmt - fees, 0);
 };
 const daysSince = (d) => Math.floor((new Date() - new Date(d)) / 86400000);
@@ -343,13 +355,38 @@ function LeadModal(props) {
                 React.createElement("input", { value: ed.otherFees || "", onChange: function(e) { set("otherFees", e.target.value); }, placeholder: "0", style: iStyle })
               )
             ),
+            React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 } },
+              React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
+                React.createElement("input", { type: "checkbox", checked: ed.cbrFee || false, onChange: function(e) { set("cbrFee", e.target.checked); }, style: { accentColor: "#10b981", width: 16, height: 16, cursor: "pointer" } }),
+                React.createElement("span", { style: { fontSize: 13, color: "#f1f5f9", flex: 1 } }, "CBR Fee"),
+                React.createElement("span", { style: { fontSize: 12, color: "#64748b" } }, ed.cbrFee ? "-$40" : "$40")
+              ),
+              React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
+                React.createElement("input", { type: "checkbox", checked: ed.transactionFee || false, onChange: function(e) { set("transactionFee", e.target.checked); }, style: { accentColor: "#10b981", width: 16, height: 16, cursor: "pointer" } }),
+                React.createElement("span", { style: { fontSize: 13, color: "#f1f5f9", flex: 1 } }, "Transaction Fee"),
+                React.createElement("span", { style: { fontSize: 12, color: "#64748b" } }, ed.transactionFee ? "-$285" : "$285")
+              ),
+              React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
+                React.createElement("span", { style: { fontSize: 13, color: "#f1f5f9", flex: 1 } }, "Transaction Coordinator"),
+                React.createElement("select", { value: ed.tcFee || 0, onChange: function(e) { set("tcFee", parseFloat(e.target.value)); }, style: { background: "#111827", border: "1px solid #1e293b", borderRadius: 8, color: "#f1f5f9", padding: "5px 10px", fontSize: 13, fontFamily: "inherit" } },
+                  React.createElement("option", { value: 0 }, "None"),
+                  React.createElement("option", { value: 250 }, "$250"),
+                  React.createElement("option", { value: 275 }, "$275"),
+                  React.createElement("option", { value: 350 }, "$350")
+                )
+              ),
+              React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
+                React.createElement("span", { style: { fontSize: 13, color: "#f1f5f9", flex: 1 } }, "Pre Cap Equity Contribution ($)"),
+                React.createElement("input", { value: ed.preCapEquity || "", onChange: function(e) { set("preCapEquity", e.target.value); }, placeholder: "0", style: { width: 100, background: "#111827", border: "1px solid #1e293b", borderRadius: 8, color: "#f1f5f9", padding: "5px 10px", fontSize: 13, fontFamily: "inherit" } })
+              )
+            ),
             React.createElement("div", { style: { background: "#0d1117", borderRadius: 8, padding: "10px 14px", display: "flex", justifyContent: "space-between", marginTop: 8 } },
               React.createElement("span", { style: { fontSize: 13, color: "#64748b" } }, "Gross commission"),
               React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "#f59e0b" } }, fmt(calcCommission(ed.budget, ed.commission)))
             ),
             React.createElement("div", { style: { background: "#0d1117", borderRadius: 8, padding: "10px 14px", display: "flex", justifyContent: "space-between", marginTop: 4 } },
               React.createElement("span", { style: { fontSize: 13, color: "#64748b" } }, "Actual income (after split & fees)"),
-              React.createElement("span", { style: { fontSize: 14, fontWeight: 800, color: "#10b981" } }, fmt(calcActualIncome(ed.budget, ed.commission, ed.applyplit, ed.splitPaid, ed.otherFees)))
+              React.createElement("span", { style: { fontSize: 14, fontWeight: 800, color: "#10b981" } }, fmt(calcActualIncome(ed.budget, ed.commission, ed.applyplit, ed.splitPaid, ed.otherFees, ed.cbrFee, ed.transactionFee, ed.tcFee, ed.preCapEquity)))
             )
           ),
           React.createElement("div", { style: { background: "#111827", borderRadius: 12, padding: 16, border: "1px solid #1e293b", marginBottom: 16 } },
@@ -423,7 +460,7 @@ export default function App() {
   var typeFilterState = React.useState("All Types"); var typeFilter = typeFilterState[0]; var setTypeFilter = typeFilterState[1];
   var aiReportState = React.useState(""); var aiReport = aiReportState[0]; var setAiReport = aiReportState[1];
   var loadingReportState = React.useState(false); var loadingReport = loadingReportState[0]; var setLoadingReport = loadingReportState[1];
-  var newLeadState = React.useState({ name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr(),applyplit:false,splitPaid:0,otherFees:0 });
+  var newLeadState = React.useState({ name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr(),applyplit:false,splitPaid:0,otherFees:0,cbrFee:false,transactionFee:false,tcFee:0,preCapEquity:0 });
   var newLead = newLeadState[0]; var setNewLead = newLeadState[1];
 
   // ── Load from Supabase on mount, fall back to localStorage ─────────────────
@@ -478,7 +515,7 @@ export default function App() {
     var newLeadObj = Object.assign({}, newLead, { id: tempId, budget: parseBudget(newLead.budget) || 0, commission: parseFloat(newLead.commission) || 3, tasks: [], attachments: [], aiSummary: "" });
     setLeads(function(p) { return [newLeadObj].concat(p); });
     setShowAdd(false);
-    setNewLead({ name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr(),applyplit:false,splitPaid:0,otherFees:0 });
+    setNewLead({ name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr(),applyplit:false,splitPaid:0,otherFees:0,cbrFee:false,transactionFee:false,tcFee:0,preCapEquity:0 });
     upsertLeadToDB(newLeadObj, function(saved) {
       if (saved && saved.db_id) {
         setLeads(function(p) { return p.map(function(l) { return l.id === tempId ? Object.assign({}, newLeadObj, { db_id: saved.db_id }) : l; }); });
@@ -504,7 +541,7 @@ export default function App() {
   var overdueTasks = allOpenTasks.filter(function(t) { return t.due && new Date(t.due) < new Date(); }).length;
   var potentialIncome = activeLeadsList.reduce(function(s,l) { return s + calcCommission(l.budget, l.commission); }, 0);
   var earnedIncome = leads.filter(function(l) { return l.stage === "Closed"; }).reduce(function(s,l) { return s + calcCommission(l.budget, l.commission); }, 0);
-  var actualEarned = leads.filter(function(l) { return l.stage === "Closed"; }).reduce(function(s,l) { return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees); }, 0);
+  var actualEarned = leads.filter(function(l) { return l.stage === "Closed"; }).reduce(function(s,l) { return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity); }, 0);
   var iStyle = { width: "100%", background: "#111827", border: "1px solid #1e293b", borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" };
 
   return React.createElement("div", { style: { minHeight: "100vh", background: "#060b14", fontFamily: "'Segoe UI',sans-serif", color: "#f1f5f9" } },
