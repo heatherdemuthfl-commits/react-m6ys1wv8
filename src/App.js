@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+ import React, { useState, useEffect } from "react";
 
 const STAGES = ["New Lead","Contacted","Showing","Listing","Active Listing","Offer Made","Under Contract","Inspection","Appraisal","Financing Contingency","Clear to Close","Closed - Cap Year","Closed - Current Year","Closed","Lost"];
 const STAGE_COLORS = {
@@ -498,12 +498,16 @@ function LeadModal(props) {
 
 function LeadCard(props) {
   var lead = props.lead; var onSelect = props.onSelect;
+  var onDragStart = props.onDragStart; var onDragEnd = props.onDragEnd;
   var days = daysSince(lead.lastContact);
   var urgent = false; // follow-up alerts removed
   var openTasks = (lead.tasks || []).filter(function(t) { return !t.done; }).length;
   return React.createElement("div", {
     onClick: function() { onSelect(lead); },
-    style: { background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12, padding: "13px 15px", cursor: "pointer", marginBottom: 9, position: "relative", overflow: "hidden" },
+    draggable: true,
+    onDragStart: function(e) { e.stopPropagation(); onDragStart(lead); },
+    onDragEnd: onDragEnd,
+    style: { background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12, padding: "13px 15px", cursor: "grab", marginBottom: 9, position: "relative", overflow: "hidden" },
     onMouseEnter: function(e) { e.currentTarget.style.borderColor = STAGE_COLORS[lead.stage] + "70"; },
     onMouseLeave: function(e) { e.currentTarget.style.borderColor = "#1e293b"; }
   },
@@ -547,6 +551,8 @@ export default function App() {
   var aiReportState = React.useState(""); var aiReport = aiReportState[0]; var setAiReport = aiReportState[1];
   var loadingReportState = React.useState(false); var loadingReport = loadingReportState[0]; var setLoadingReport = loadingReportState[1];
   var newLeadState = React.useState({ name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr(),closeDate:"",closedYear:"",applyplit:false,splitPaid:0,otherFees:0,cbrFee:false,transactionFee:false,tcFee:0,preCapEquity:0,brokerageFee:false,agentReferralPaid:0,commissionBonus:0,incomingReferral:0,referralOnly:false,referralFrom:"" });
+  var dragLeadState = React.useState(null); var dragLead = dragLeadState[0]; var setDragLead = dragLeadState[1];
+  var dragOverState = React.useState(null); var dragOver = dragOverState[0]; var setDragOver = dragOverState[1];
   var newLead = newLeadState[0]; var setNewLead = newLeadState[1];
 
   // ── Load from Supabase on mount, fall back to localStorage ─────────────────
@@ -637,6 +643,17 @@ export default function App() {
       }
     });
   }
+
+  function handleDragStart(lead) { setDragLead(lead); }
+  function handleDragOver(stage, e) { e.preventDefault(); setDragOver(stage); }
+  function handleDrop(stage) {
+    if (!dragLead || dragLead.stage === stage) { setDragLead(null); setDragOver(null); return; }
+    var updated = Object.assign({}, dragLead, { stage: stage });
+    updateLead(updated);
+    setDragLead(null);
+    setDragOver(null);
+  }
+  function handleDragEnd() { setDragLead(null); setDragOver(null); }
 
   var filtered = leads.filter(function(l) {
     return (l.name.toLowerCase().indexOf(search.toLowerCase()) > -1 || (l.propertyInterest || "").toLowerCase().indexOf(search.toLowerCase()) > -1) &&
