@@ -114,15 +114,15 @@ const calcCommission = (budget, commission) => { var b = parseBudget(budget); va
 
 const calcActualIncome = (budget, commission, applyplit, splitPaid, otherFees, cbrFee, transactionFee, tcFee, preCapEquity, brokerageFee, agentReferralPaid, commissionBonus) => {
   var gross = calcCommission(budget, commission) + (parseFloat(commissionBonus) || 0);
-  var splitAmt = applyplit ? Math.min(gross * 0.15, Math.max(0, 12000 - (parseFloat(splitPaid) || 0))) : 0;
-  var fees = (parseFloat(otherFees) || 0)
+  var netBeforeSplit = gross - (parseFloat(agentReferralPaid) || 0); // referral deducted BEFORE split
+  var splitAmt = applyplit ? Math.min(netBeforeSplit * 0.15, Math.max(0, 12000 - (parseFloat(splitPaid) || 0))) : 0;
+  var otherFeeTotal = (parseFloat(otherFees) || 0)
     + (cbrFee ? 40 : 0)
     + (transactionFee ? 285 : 0)
     + (parseFloat(tcFee) || 0)
     + (parseFloat(preCapEquity) || 0)
-    + (brokerageFee ? 250 : 0)
-    + (parseFloat(agentReferralPaid) || 0);
-  return Math.max(gross - splitAmt - fees, 0);
+    + (brokerageFee ? 250 : 0);
+  return Math.max(netBeforeSplit - splitAmt - otherFeeTotal, 0);
 };
 const daysSince = (d) => Math.floor((new Date() - new Date(d)) / 86400000);
 const todayStr = () => new Date().toISOString().split("T")[0];
