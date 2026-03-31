@@ -542,6 +542,14 @@ export default function App() {
   var potentialIncome = activeLeadsList.reduce(function(s,l) { return s + calcCommission(l.budget, l.commission); }, 0);
   var earnedIncome = leads.filter(function(l) { return l.stage === "Closed"; }).reduce(function(s,l) { return s + calcCommission(l.budget, l.commission); }, 0);
   var actualEarned = leads.filter(function(l) { return l.stage === "Closed"; }).reduce(function(s,l) { return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity); }, 0);
+  // Cap tracker: sum all split amounts paid across closed deals
+  var totalSplitPaid = leads.filter(function(l) { return l.stage === "Closed"; }).reduce(function(s,l) {
+    var gross = calcCommission(l.budget, l.commission);
+    var splitAmt = l.applyplit ? Math.min(gross * 0.15, Math.max(0, 12000 - (parseFloat(l.splitPaid) || 0))) : 0;
+    return s + splitAmt + (parseFloat(l.splitPaid) || 0);
+  }, 0);
+  var capProgress = Math.min(totalSplitPaid, 12000);
+  var isCapped = capProgress >= 12000;
   var iStyle = { width: "100%", background: "#111827", border: "1px solid #1e293b", borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" };
 
   return React.createElement("div", { style: { minHeight: "100vh", background: "#060b14", fontFamily: "'Segoe UI',sans-serif", color: "#f1f5f9" } },
@@ -586,6 +594,27 @@ export default function App() {
           React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 600, marginTop: 2 } }, s.label)
         );
       })
+    ),
+    // ── Cap tracker bar ──────────────────────────────────────────────────────
+    React.createElement("div", { style: { padding: "12px 24px", borderBottom: "1px solid #1e293b", background: "#0d1117" } },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 } },
+        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
+          React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: isCapped ? "#10b981" : "#f1f5f9" } }, isCapped ? "🎉 CAPPED! No more splits this year!" : "Real Broker Cap Progress"),
+          !isCapped ? React.createElement("span", { style: { fontSize: 12, color: "#64748b" } }, fmt(capProgress) + " of $12,000 paid") : null
+        ),
+        React.createElement("span", { style: { fontSize: 13, fontWeight: 800, color: isCapped ? "#10b981" : "#f59e0b" } },
+          isCapped ? "✅ Capped" : (fmt(12000 - capProgress) + " to cap")
+        )
+      ),
+      React.createElement("div", { style: { background: "#1e293b", borderRadius: 6, height: 8, overflow: "hidden" } },
+        React.createElement("div", { style: {
+          height: "100%",
+          width: Math.round(capProgress / 12000 * 100) + "%",
+          background: isCapped ? "#10b981" : "linear-gradient(90deg,#3b82f6,#f59e0b)",
+          borderRadius: 6,
+          transition: "width 0.5s"
+        }})
+      )
     ),
     // ── Main content ─────────────────────────────────────────────────────────
     React.createElement("div", { style: { padding: "20px 24px" } },
