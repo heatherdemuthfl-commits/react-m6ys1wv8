@@ -8,6 +8,7 @@ const STAGE_COLORS = {
 const LEAD_TYPES = ["Buyer","Seller","Buyer & Seller"];
 const TYPE_COLORS = { "Buyer":"#06b6d4","Seller":"#f97316","Buyer & Seller":"#a855f7" };
 const TYPE_ICONS = { "Buyer":"🏠","Seller":"🏷️","Buyer & Seller":"🔄" };
+const LEAD_SOURCES = ["Referral","SOI","Social Media","Open House","Past Client","Other"];
 
 const STORAGE_KEY = "re_pipeline_v4";
 
@@ -66,7 +67,8 @@ function dbToLead(r) {
     agentReferralPaid: r.agent_referral_paid || 0,
     commissionBonus: r.commission_bonus || 0,
     incomingReferral: r.incoming_referral || 0,
-    referralOnly: r.referral_only || false
+    referralOnly: r.referral_only || false,
+    referralFrom: r.referral_from || ""
   };
 }
 function upsertLeadToDB(lead, onSuccess, onError) {
@@ -97,7 +99,8 @@ function upsertLeadToDB(lead, onSuccess, onError) {
     agent_referral_paid: parseFloat(lead.agentReferralPaid) || 0,
     commission_bonus: parseFloat(lead.commissionBonus) || 0,
     incoming_referral: parseFloat(lead.incomingReferral) || 0,
-    referral_only: lead.referralOnly || false
+    referral_only: lead.referralOnly || false,
+    referral_from: lead.referralFrom || ""
   };
   if (lead.db_id) payload.db_id = lead.db_id;
   sbFetch("leads", {
@@ -325,13 +328,33 @@ function LeadModal(props) {
         ),
         tab === "details" ? React.createElement("div", null,
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 } },
-            [["Name","name"],["Phone","phone"],["Email","email"],["Source","source"],["Budget ($)","budget"],["Commission (%)","commission"],["Close Date","closeDate"],["Closed Year (cap)","closedYear"]].map(function(pair) {
+            [["Name","name"],["Phone","phone"],["Email","email"],["Budget ($)","budget"],["Commission (%)","commission"],["Close Date","closeDate"],["Closed Year (cap)","closedYear"]].map(function(pair) {
               var label = pair[0]; var key = pair[1];
               return React.createElement("div", { key: key },
                 React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } }, label),
                 React.createElement("input", { value: ed[key] || "", onChange: function(e) { set(key, e.target.value); }, type: key === "closeDate" ? "date" : "text", placeholder: key === "closedYear" ? "e.g. 2025" : "", style: iStyle })
               );
             })
+          ),
+          React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 } },
+            React.createElement("div", null,
+              React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } }, "Lead Source"),
+              React.createElement("select", { value: ed.source || "", onChange: function(e) { set("source", e.target.value); }, style: iStyle },
+                React.createElement("option", { value: "" }, "Select source..."),
+                LEAD_SOURCES.map(function(s) { return React.createElement("option", { key: s, value: s }, s); })
+              )
+            ),
+            React.createElement("div", null,
+              React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } },
+                ed.source === "Referral" ? "Referred by" : "Source detail"
+              ),
+              React.createElement("input", {
+                value: ed.referralFrom || "",
+                onChange: function(e) { set("referralFrom", e.target.value); },
+                placeholder: ed.source === "Referral" ? "Who referred them?" : "Optional detail",
+                style: iStyle
+              })
+            )
           ),
           React.createElement("div", { style: { marginBottom: 12 } },
             React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } }, "Property Interest"),
@@ -513,7 +536,7 @@ export default function App() {
   var typeFilterState = React.useState("All Types"); var typeFilter = typeFilterState[0]; var setTypeFilter = typeFilterState[1];
   var aiReportState = React.useState(""); var aiReport = aiReportState[0]; var setAiReport = aiReportState[1];
   var loadingReportState = React.useState(false); var loadingReport = loadingReportState[0]; var setLoadingReport = loadingReportState[1];
-  var newLeadState = React.useState({ name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr(),closeDate:"",closedYear:"",applyplit:false,splitPaid:0,otherFees:0,cbrFee:false,transactionFee:false,tcFee:0,preCapEquity:0,brokerageFee:false,agentReferralPaid:0,commissionBonus:0,incomingReferral:0,referralOnly:false });
+  var newLeadState = React.useState({ name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr(),closeDate:"",closedYear:"",applyplit:false,splitPaid:0,otherFees:0,cbrFee:false,transactionFee:false,tcFee:0,preCapEquity:0,brokerageFee:false,agentReferralPaid:0,commissionBonus:0,incomingReferral:0,referralOnly:false,referralFrom:"" });
   var newLead = newLeadState[0]; var setNewLead = newLeadState[1];
 
   // ── Load from Supabase on mount, fall back to localStorage ─────────────────
@@ -597,7 +620,7 @@ export default function App() {
     var newLeadObj = Object.assign({}, newLead, { id: tempId, budget: parseBudget(newLead.budget) || 0, commission: parseFloat(newLead.commission) || 3, tasks: [], attachments: [], aiSummary: "" });
     setLeads(function(p) { return [newLeadObj].concat(p); });
     setShowAdd(false);
-    setNewLead({ name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr(),closeDate:"",closedYear:"",applyplit:false,splitPaid:0,otherFees:0,cbrFee:false,transactionFee:false,tcFee:0,preCapEquity:0,brokerageFee:false,agentReferralPaid:0,commissionBonus:0,incomingReferral:0,referralOnly:false });
+    setNewLead({ name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr(),closeDate:"",closedYear:"",applyplit:false,splitPaid:0,otherFees:0,cbrFee:false,transactionFee:false,tcFee:0,preCapEquity:0,brokerageFee:false,agentReferralPaid:0,commissionBonus:0,incomingReferral:0,referralOnly:false,referralFrom:"" });
     upsertLeadToDB(newLeadObj, function(saved) {
       if (saved && saved.db_id) {
         setLeads(function(p) { return p.map(function(l) { return l.id === tempId ? Object.assign({}, newLeadObj, { db_id: saved.db_id }) : l; }); });
@@ -668,6 +691,35 @@ export default function App() {
   }, 0);
   var capProgress = Math.min(totalSplitPaid, 12000);
   var isCapped = capProgress >= 12000;
+
+  // ── Buyer / Seller breakdown ───────────────────────────────────────────────
+  var allActive = leads.filter(function(l) { return l.stage !== "Lost"; });
+  var totalLeads = allActive.length;
+  var buyerCount = allActive.filter(function(l) { return l.type === "Buyer"; }).length;
+  var sellerCount = allActive.filter(function(l) { return l.type === "Seller"; }).length;
+  var bothCount = allActive.filter(function(l) { return l.type === "Buyer & Seller"; }).length;
+  var buyerPct = totalLeads ? Math.round(buyerCount / totalLeads * 100) : 0;
+  var sellerPct = totalLeads ? Math.round(sellerCount / totalLeads * 100) : 0;
+  var bothPct = totalLeads ? Math.round(bothCount / totalLeads * 100) : 0;
+
+  // ── Top lead sources ───────────────────────────────────────────────────────
+  var sourceCounts = {};
+  allActive.forEach(function(l) {
+    var src = l.source && l.source.trim() ? l.source.trim() : "Unknown";
+    sourceCounts[src] = (sourceCounts[src] || 0) + 1;
+  });
+  var topSources = Object.keys(sourceCounts)
+    .map(function(k) { return { source: k, count: sourceCounts[k] }; })
+    .sort(function(a, b) { return b.count - a.count; })
+    .slice(0, 3);
+
+  // ── Top stages by lead count ───────────────────────────────────────────────
+  var stageCounts = {};
+  allActive.forEach(function(l) { stageCounts[l.stage] = (stageCounts[l.stage] || 0) + 1; });
+  var topStages = Object.keys(stageCounts)
+    .map(function(k) { return { stage: k, count: stageCounts[k] }; })
+    .sort(function(a, b) { return b.count - a.count; })
+    .slice(0, 3);
   var iStyle = { width: "100%", background: "#111827", border: "1px solid #1e293b", borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" };
 
   return React.createElement("div", { style: { minHeight: "100vh", background: "#060b14", fontFamily: "'Segoe UI',sans-serif", color: "#f1f5f9" } },
@@ -714,6 +766,64 @@ export default function App() {
           React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 600, marginTop: 2 } }, s.label)
         );
       })
+    ),
+    // ── Buyer/Seller breakdown bar ───────────────────────────────────────────
+    React.createElement("div", { style: { padding: "12px 24px", borderBottom: "1px solid #1e293b", background: "#0d1117", display: "flex", gap: 24, flexWrap: "wrap", alignItems: "center" } },
+      React.createElement("div", { style: { flex: 1, minWidth: 200 } },
+        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 5 } },
+          React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase" } }, "Lead breakdown"),
+          React.createElement("span", { style: { fontSize: 11, color: "#64748b" } }, totalLeads + " total")
+        ),
+        React.createElement("div", { style: { display: "flex", height: 8, borderRadius: 6, overflow: "hidden", gap: 1 } },
+          buyerPct > 0 ? React.createElement("div", { style: { width: buyerPct + "%", background: "#06b6d4" }, title: "Buyers " + buyerPct + "%" }) : null,
+          sellerPct > 0 ? React.createElement("div", { style: { width: sellerPct + "%", background: "#f97316" }, title: "Sellers " + sellerPct + "%" }) : null,
+          bothPct > 0 ? React.createElement("div", { style: { width: bothPct + "%", background: "#a855f7" }, title: "Both " + bothPct + "%" }) : null
+        ),
+        React.createElement("div", { style: { display: "flex", gap: 14, marginTop: 6 } },
+          React.createElement("span", { style: { fontSize: 11, color: "#06b6d4" } }, "🏠 Buyers " + buyerPct + "% (" + buyerCount + ")"),
+          React.createElement("span", { style: { fontSize: 11, color: "#f97316" } }, "🏷️ Sellers " + sellerPct + "% (" + sellerCount + ")"),
+          React.createElement("span", { style: { fontSize: 11, color: "#a855f7" } }, "🔄 Both " + bothPct + "% (" + bothCount + ")")
+        )
+      ),
+      React.createElement("div", { style: { flex: 1, minWidth: 180 } },
+        React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", marginBottom: 6 } }, "Top sources"),
+        topSources.length === 0
+          ? React.createElement("span", { style: { fontSize: 12, color: "#334155" } }, "No data yet")
+          : topSources.map(function(s, i) {
+              var pct = totalLeads ? Math.round(s.count / totalLeads * 100) : 0;
+              return React.createElement("div", { key: s.source, style: { display: "flex", justifyContent: "space-between", fontSize: 12, color: "#cbd5e1", marginBottom: 3 } },
+                React.createElement("span", null, ["🥇","🥈","🥉"][i] + " " + s.source),
+                React.createElement("span", { style: { color: "#64748b" } }, pct + "% (" + s.count + ")")
+              );
+            })
+      ),
+      React.createElement("div", { style: { flex: 1, minWidth: 180 } },
+        React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", marginBottom: 6 } }, "Top referrers"),
+        (function() {
+          var referrals = allActive.filter(function(l) { return l.source === "Referral" && l.referralFrom && l.referralFrom.trim(); });
+          if (referrals.length === 0) return React.createElement("span", { style: { fontSize: 12, color: "#334155" } }, "No referrals yet");
+          var refCounts = {};
+          referrals.forEach(function(l) { var r = l.referralFrom.trim(); refCounts[r] = (refCounts[r] || 0) + 1; });
+          var topRefs = Object.keys(refCounts).map(function(k) { return { name: k, count: refCounts[k] }; }).sort(function(a,b) { return b.count - a.count; }).slice(0, 3);
+          return topRefs.map(function(r, i) {
+            return React.createElement("div", { key: r.name, style: { display: "flex", justifyContent: "space-between", fontSize: 12, color: "#cbd5e1", marginBottom: 3 } },
+              React.createElement("span", null, ["🥇","🥈","🥉"][i] + " " + r.name),
+              React.createElement("span", { style: { color: "#64748b" } }, r.count + " lead" + (r.count !== 1 ? "s" : ""))
+            );
+          });
+        })()
+      ),
+      React.createElement("div", { style: { flex: 1, minWidth: 180 } },
+        React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", marginBottom: 6 } }, "Top stages"),
+        topStages.length === 0
+          ? React.createElement("span", { style: { fontSize: 12, color: "#334155" } }, "No data yet")
+          : topStages.map(function(s, i) {
+              return React.createElement("div", { key: s.stage, style: { display: "flex", justifyContent: "space-between", fontSize: 12, color: "#cbd5e1", marginBottom: 3 } },
+                React.createElement("span", null, ["🥇","🥈","🥉"][i] + " " + s.stage),
+                React.createElement("span", { style: { color: "#64748b" } }, s.count + " lead" + (s.count !== 1 ? "s" : ""))
+              );
+            })
+      )
     ),
     // ── Cap tracker bar ──────────────────────────────────────────────────────
     React.createElement("div", { style: { padding: "12px 24px", borderBottom: "1px solid #1e293b", background: "#0d1117" } },
@@ -920,13 +1030,33 @@ export default function App() {
       React.createElement("div", { style: { background: "#0d1117", border: "1px solid #1e293b", borderRadius: 20, width: "100%", maxWidth: 560, maxHeight: "90vh", overflowY: "auto", padding: 28, fontFamily: "inherit" } },
         React.createElement("div", { style: { fontWeight: 800, fontSize: 20, color: "#f1f5f9", marginBottom: 20 } }, "Add New Lead"),
         React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 } },
-          [["Full Name *","name"],["Phone","phone"],["Email","email"],["Source","source"],["Budget ($)","budget"],["Commission (%)","commission"],["Last Contact","lastContact"]].map(function(pair) {
+          [["Full Name *","name"],["Phone","phone"],["Email","email"],["Budget ($)","budget"],["Commission (%)","commission"],["Last Contact","lastContact"]].map(function(pair) {
             var label = pair[0]; var key = pair[1];
             return React.createElement("div", { key: key },
               React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } }, label),
               React.createElement("input", { value: newLead[key] || "", onChange: function(e) { var v = e.target.value; setNewLead(function(p) { var o = Object.assign({}, p); o[key] = v; return o; }); }, type: key === "lastContact" ? "date" : "text", style: iStyle })
             );
           })
+        ),
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 } },
+          React.createElement("div", null,
+            React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } }, "Lead Source"),
+            React.createElement("select", { value: newLead.source || "", onChange: function(e) { var v = e.target.value; setNewLead(function(p) { return Object.assign({}, p, { source: v }); }); }, style: iStyle },
+              React.createElement("option", { value: "" }, "Select source..."),
+              LEAD_SOURCES.map(function(s) { return React.createElement("option", { key: s, value: s }, s); })
+            )
+          ),
+          React.createElement("div", null,
+            React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } },
+              newLead.source === "Referral" ? "Referred by" : "Source detail"
+            ),
+            React.createElement("input", {
+              value: newLead.referralFrom || "",
+              onChange: function(e) { var v = e.target.value; setNewLead(function(p) { return Object.assign({}, p, { referralFrom: v }); }),
+              placeholder: newLead.source === "Referral" ? "Who referred them?" : "Optional detail",
+              style: iStyle
+            })
+          )
         ),
         React.createElement("div", { style: { marginBottom: 12 } },
           React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } }, "Property Interest"),
