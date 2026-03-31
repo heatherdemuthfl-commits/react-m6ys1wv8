@@ -1,4 +1,6 @@
- import React, { useState, useEffect } from "react";
+ 
+
+import React, { useState, useEffect } from "react";
 
 const STAGES = ["New Lead","Contacted","Showing","Listing","Active Listing","Offer Made","Under Contract","Inspection","Appraisal","Financing Contingency","Clear to Close","Closed - Cap Year","Closed - Current Year","Closed","Lost"];
 const STAGE_COLORS = {
@@ -11,7 +13,7 @@ const TYPE_ICONS = { "Buyer":"🏠","Seller":"🏷️","Buyer & Seller":"🔄" }
 const LEAD_SOURCES = ["Referral","Agent Referral","SOI","Social Media","Open House","Past Client","Gym","Other"];
 const SOI_OPTIONS = ["Friend","Family","Neighbor","Coworker","Church","Other"];
 const SOCIAL_OPTIONS = ["Instagram","TikTok","Facebook"];
-const PAST_CLIENT_OPTIONS = ["Buyer","Seller"];
+const PAST_CLIENT_OPTIONS = ["Buyer","Seller","Buyer & Seller"];
 
 const STORAGE_KEY = "re_pipeline_v4";
 
