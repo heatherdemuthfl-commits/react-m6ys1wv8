@@ -425,7 +425,12 @@ function LeadModal(props) {
             ),
             React.createElement("div", { style: { background: "#0d1117", borderRadius: 8, padding: "10px 14px", display: "flex", justifyContent: "space-between", marginTop: 8 } },
               React.createElement("span", { style: { fontSize: 13, color: "#64748b" } }, "Gross commission"),
-              React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "#f59e0b" } }, fmt(calcCommission(ed.budget, ed.commission)))
+              React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "#f59e0b" } },
+                fmt(ed.referralOnly
+                  ? (parseFloat(ed.incomingReferral) || 0)
+                  : calcCommission(ed.budget, ed.commission) + (parseFloat(ed.commissionBonus) || 0) + (parseFloat(ed.incomingReferral) || 0)
+                )
+              )
             ),
             React.createElement("div", { style: { background: "#0d1117", borderRadius: 8, padding: "10px 14px", display: "flex", justifyContent: "space-between", marginTop: 4 } },
               React.createElement("span", { style: { fontSize: 13, color: "#64748b" } }, "Actual income (after split & fees)"),
