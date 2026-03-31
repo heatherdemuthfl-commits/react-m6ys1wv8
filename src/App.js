@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
 
-const STAGES = ["New Lead","Contacted","Showing","Listing","Active Listing","Offer Made","Under Contract","Inspection","Appraisal","Financing Contingency","Clear to Close","Closed - Cap Year","Closed - Current Year","Lost"];
+const STAGES = ["New Lead","Contacted","Showing","Listing","Active Listing","Offer Made","Under Contract","Inspection","Appraisal","Financing Contingency","Clear to Close","Closed - Cap Year","Closed - Current Year","Closed","Lost"];
 const STAGE_COLORS = {
   "New Lead":"#3b82f6","Contacted":"#8b5cf6","Showing":"#f59e0b","Listing":"#ec4899","Active Listing":"#14b8a6",
-  "Offer Made":"#ef4444","Under Contract":"#10b981","Inspection":"#f97316","Appraisal":"#eab308","Financing Contingency":"#06b6d4","Clear to Close":"#8b5cf6","Closed - Cap Year":"#059669","Closed - Current Year":"#10b981","Lost":"#475569",
+  "Offer Made":"#ef4444","Under Contract":"#10b981","Inspection":"#f97316","Appraisal":"#eab308","Financing Contingency":"#06b6d4","Clear to Close":"#8b5cf6","Closed - Cap Year":"#059669","Closed - Current Year":"#10b981","Closed":"#334155","Lost":"#475569",
 };
 const LEAD_TYPES = ["Buyer","Seller","Buyer & Seller"];
 const TYPE_COLORS = { "Buyer":"#06b6d4","Seller":"#f97316","Buyer & Seller":"#a855f7" };
@@ -466,7 +466,7 @@ function LeadModal(props) {
 function LeadCard(props) {
   var lead = props.lead; var onSelect = props.onSelect;
   var days = daysSince(lead.lastContact);
-  var urgent = days >= 3 && lead.stage !== "Closed - Cap Year" && lead.stage !== "Closed - Current Year" && lead.stage !== "Lost";
+  var urgent = days >= 3 && lead.stage !== "Closed - Cap Year" && lead.stage !== "Closed - Current Year" && lead.stage !== "Closed" && lead.stage !== "Lost";
   var openTasks = (lead.tasks || []).filter(function(t) { return !t.done; }).length;
   return React.createElement("div", {
     onClick: function() { onSelect(lead); },
@@ -549,6 +549,35 @@ export default function App() {
     if (loaded) saveToLocal(leads);
   }, [leads, loaded]);
 
+  // ── Auto-archive old Closed - Cap Year leads ──────────────────────────────
+  React.useEffect(function() {
+    if (!loaded) return;
+    var now = new Date();
+    // Current cap year starts July 1
+    var capStart = now.getMonth() >= 6
+      ? new Date(now.getFullYear(), 6, 1)
+      : new Date(now.getFullYear() - 1, 6, 1);
+
+    var toArchive = leads.filter(function(l) {
+      if (l.stage !== "Closed - Cap Year") return false;
+      if (!l.closeDate) return false; // only auto-archive if close date is set
+      return new Date(l.closeDate) < capStart;
+    });
+
+    if (toArchive.length > 0) {
+      setLeads(function(prev) {
+        return prev.map(function(l) {
+          if (toArchive.find(function(a) { return a.id === l.id; })) {
+            var updated = Object.assign({}, l, { stage: "Closed" });
+            upsertLeadToDB(updated); // save to Supabase
+            return updated;
+          }
+          return l;
+        });
+      });
+    }
+  }, [loaded]);
+
   function updateLead(u) {
     setLeads(function(p) { return p.map(function(l) { return l.id === u.id ? u : l; }); });
     upsertLeadToDB(u, function(saved) {
@@ -583,12 +612,12 @@ export default function App() {
   });
 
   // Active = past Contacted. Potential = Contacted only.
-  var activeLeadsList = leads.filter(function(l) { return l.stage !== "Closed - Cap Year" && l.stage !== "Closed - Current Year" && l.stage !== "Lost" && l.stage !== "Contacted" && l.stage !== "New Lead"; });
+  var activeLeadsList = leads.filter(function(l) { return l.stage !== "Closed - Cap Year" && l.stage !== "Closed - Current Year" && l.stage !== "Closed" && l.stage !== "Lost" && l.stage !== "Contacted" && l.stage !== "New Lead"; });
   var potentialLeadsList = leads.filter(function(l) { return l.stage === "New Lead" || l.stage === "Contacted"; });
   var totalPipeline = activeLeadsList.reduce(function(s,l) { return s + parseBudget(l.budget); }, 0);
   var potentialPipeline = potentialLeadsList.reduce(function(s,l) { return s + parseBudget(l.budget); }, 0);
   var activeLeads = activeLeadsList.length;
-  var urgentLeads = leads.filter(function(l) { return daysSince(l.lastContact) >= 3 && l.stage !== "Closed - Cap Year" && l.stage !== "Closed - Current Year" && l.stage !== "Lost"; }).length;
+  var urgentLeads = leads.filter(function(l) { return daysSince(l.lastContact) >= 3 && l.stage !== "Closed - Cap Year" && l.stage !== "Closed - Current Year" && l.stage !== "Closed" && l.stage !== "Lost"; }).length;
   var allOpenTasks = leads.reduce(function(acc, l) { return acc.concat((l.tasks || []).filter(function(t) { return !t.done; })); }, []);
   var overdueTasks = allOpenTasks.filter(function(t) { return t.due && new Date(t.due) < new Date(); }).length;
   var potentialIncome = activeLeadsList.reduce(function(s,l) { return s + calcCommission(l.budget, l.commission); }, 0);
@@ -782,7 +811,7 @@ export default function App() {
           var overdue = allTasks.filter(function(t) { return t.due && new Date(t.due) < new Date(); });
           var todayTasks = allTasks.filter(function(t) { return t.due === todayStr(); });
           var upcoming = allTasks.filter(function(t) { return t.due && t.due > todayStr(); }).sort(function(a,b) { return a.due > b.due ? 1 : -1; });
-          var cold = leads.filter(function(l) { return daysSince(l.lastContact) >= 3 && l.stage !== "Closed - Cap Year" && l.stage !== "Closed - Current Year" && l.stage !== "Lost"; });
+          var cold = leads.filter(function(l) { return daysSince(l.lastContact) >= 3 && l.stage !== "Closed - Cap Year" && l.stage !== "Closed - Current Year" && l.stage !== "Closed" && l.stage !== "Lost"; });
 
           function Section(title, items, color) {
             if (items.length === 0) return null;
