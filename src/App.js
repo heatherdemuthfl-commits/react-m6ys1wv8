@@ -8,7 +8,7 @@ const STAGE_COLORS = {
 const LEAD_TYPES = ["Buyer","Seller","Buyer & Seller"];
 const TYPE_COLORS = { "Buyer":"#06b6d4","Seller":"#f97316","Buyer & Seller":"#a855f7" };
 const TYPE_ICONS = { "Buyer":"🏠","Seller":"🏷️","Buyer & Seller":"🔄" };
-const LEAD_SOURCES = ["Referral","SOI","Social Media","Open House","Past Client","Other"];
+const LEAD_SOURCES = ["Referral","Agent Referral","SOI","Social Media","Open House","Past Client","Other"];
 
 const STORAGE_KEY = "re_pipeline_v4";
 
@@ -340,7 +340,7 @@ function LeadModal(props) {
             React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 8, textTransform: "uppercase" } }, "Lead Source"),
             React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 } },
               LEAD_SOURCES.map(function(s) {
-                var icons = { "Referral":"🤝", "SOI":"👥", "Social Media":"📱", "Open House":"🏠", "Past Client":"⭐", "Other":"✏️" };
+                var icons = { "Referral":"🤝", "Agent Referral":"🏡", "SOI":"👥", "Social Media":"📱", "Open House":"🏠", "Past Client":"⭐", "Other":"✏️" };
                 var active = ed.source === s;
                 return React.createElement("button", {
                   key: s,
@@ -353,10 +353,10 @@ function LeadModal(props) {
                 }, icons[s] + " " + s);
               })
             ),
-            ed.source === "Referral" ? React.createElement("input", {
+            (ed.source === "Referral" || ed.source === "Agent Referral") ? React.createElement("input", {
               value: ed.referralFrom || "",
               onChange: function(e) { set("referralFrom", e.target.value); },
-              placeholder: "Who referred them?",
+              placeholder: ed.source === "Agent Referral" ? "Which agent referred them?" : "Who referred them?",
               style: iStyle
             }) : null,
             ed.source === "Other" ? React.createElement("input", {
@@ -810,7 +810,7 @@ export default function App() {
       React.createElement("div", { style: { flex: 1, minWidth: 180 } },
         React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", marginBottom: 6 } }, "Top referrers"),
         (function() {
-          var referrals = allActive.filter(function(l) { return l.source === "Referral" && l.referralFrom && l.referralFrom.trim(); });
+          var referrals = allActive.filter(function(l) { return (l.source === "Referral" || l.source === "Agent Referral") && l.referralFrom && l.referralFrom.trim(); });
           if (referrals.length === 0) return React.createElement("span", { style: { fontSize: 12, color: "#334155" } }, "No referrals yet");
           var refCounts = {};
           referrals.forEach(function(l) { var r = l.referralFrom.trim(); refCounts[r] = (refCounts[r] || 0) + 1; });
@@ -1065,10 +1065,10 @@ export default function App() {
               }, icons[s] + " " + s);
             })
           ),
-          newLead.source === "Referral" ? React.createElement("input", {
+          (newLead.source === "Referral" || newLead.source === "Agent Referral") ? React.createElement("input", {
             value: newLead.referralFrom || "",
             onChange: function(e) { var v = e.target.value; setNewLead(function(p) { return Object.assign({}, p, { referralFrom: v }); }); },
-            placeholder: "Who referred them?",
+            placeholder: newLead.source === "Agent Referral" ? "Which agent referred them?" : "Who referred them?",
             style: iStyle
           }) : null,
           newLead.source === "Other" ? React.createElement("input", {
