@@ -499,19 +499,19 @@ function LeadModal(props) {
 function LeadCard(props) {
   var lead = props.lead; var onSelect = props.onSelect;
   var days = daysSince(lead.lastContact);
-  var urgent = days >= 3 && lead.stage !== "Closed - Cap Year" && lead.stage !== "Closed - Current Year" && lead.stage !== "Closed" && lead.stage !== "Lost";
+  var urgent = false; // follow-up alerts removed
   var openTasks = (lead.tasks || []).filter(function(t) { return !t.done; }).length;
   return React.createElement("div", {
     onClick: function() { onSelect(lead); },
-    style: { background: "#0f172a", border: "1px solid " + (urgent ? "#ef444430" : "#1e293b"), borderRadius: 12, padding: "13px 15px", cursor: "pointer", marginBottom: 9, position: "relative", overflow: "hidden" },
+    style: { background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12, padding: "13px 15px", cursor: "pointer", marginBottom: 9, position: "relative", overflow: "hidden" },
     onMouseEnter: function(e) { e.currentTarget.style.borderColor = STAGE_COLORS[lead.stage] + "70"; },
-    onMouseLeave: function(e) { e.currentTarget.style.borderColor = urgent ? "#ef444430" : "#1e293b"; }
+    onMouseLeave: function(e) { e.currentTarget.style.borderColor = "#1e293b"; }
   },
     React.createElement("div", { style: { position: "absolute", top: 0, left: 0, width: 3, height: "100%", background: STAGE_COLORS[lead.stage] } }),
     React.createElement("div", { style: { paddingLeft: 8 } },
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between" } },
         React.createElement("div", { style: { fontWeight: 700, color: "#f1f5f9", fontSize: 14 } }, lead.name),
-        React.createElement("div", { style: { fontSize: 11, color: urgent ? "#ef4444" : "#64748b", fontWeight: 600 } }, days === 0 ? "Today" : days + "d ago")
+        React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 600 } }, days === 0 ? "Today" : days + "d ago")
       ),
       React.createElement("div", { style: { fontSize: 12, color: "#94a3b8", marginTop: 2 } }, lead.propertyInterest),
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, flexWrap: "wrap", gap: 4 } },
@@ -650,7 +650,7 @@ export default function App() {
   var totalPipeline = activeLeadsList.reduce(function(s,l) { return s + parseBudget(l.budget); }, 0);
   var potentialPipeline = potentialLeadsList.reduce(function(s,l) { return s + parseBudget(l.budget); }, 0);
   var activeLeads = activeLeadsList.length;
-  var urgentLeads = leads.filter(function(l) { return daysSince(l.lastContact) >= 3 && l.stage !== "Closed - Cap Year" && l.stage !== "Closed - Current Year" && l.stage !== "Closed" && l.stage !== "Lost"; }).length;
+  var urgentLeads = 0; // follow-up alerts removed
   var allOpenTasks = leads.reduce(function(acc, l) { return acc.concat((l.tasks || []).filter(function(t) { return !t.done; })); }, []);
   var overdueTasks = allOpenTasks.filter(function(t) { return t.due && new Date(t.due) < new Date(); }).length;
   var potentialIncome = activeLeadsList.reduce(function(s,l) { return s + calcCommission(l.budget, l.commission); }, 0);
@@ -764,7 +764,7 @@ export default function App() {
         { label: "Active Pipeline", value: fmt(totalPipeline), color: "#8b5cf6", icon: "📊" },
         { label: "Potential Pipeline", value: fmt(potentialPipeline), color: "#06b6d4", icon: "🎯" },
         { label: "Closed Revenue", value: fmt(closedRevenue), color: "#10b981", icon: "🏆" },
-        { label: overdueTasks ? "Overdue Tasks" : "Need Follow-Up", value: overdueTasks || urgentLeads, color: (overdueTasks || urgentLeads) > 0 ? "#ef4444" : "#10b981", icon: "⚡" },
+        { label: "Overdue Tasks", value: overdueTasks, color: overdueTasks > 0 ? "#ef4444" : "#10b981", icon: "⚡" },
         { label: "Gross Commission", value: fmt(earnedIncome), color: "#f59e0b", icon: "💰" },
         { label: "Actual Income", value: fmt(actualEarned), color: "#10b981", icon: "🏦" },
         { label: new Date().getFullYear() + " Sales Volume", value: fmt(calYearRevenue), color: "#8b5cf6", icon: "📅" },
@@ -931,7 +931,7 @@ export default function App() {
           var overdue = allTasks.filter(function(t) { return t.due && new Date(t.due) < new Date(); });
           var todayTasks = allTasks.filter(function(t) { return t.due === todayStr(); });
           var upcoming = allTasks.filter(function(t) { return t.due && t.due > todayStr(); }).sort(function(a,b) { return a.due > b.due ? 1 : -1; });
-          var cold = leads.filter(function(l) { return daysSince(l.lastContact) >= 3 && l.stage !== "Closed - Cap Year" && l.stage !== "Closed - Current Year" && l.stage !== "Closed" && l.stage !== "Lost"; });
+          var cold = []; // follow-up alerts removed
 
           function Section(title, items, color) {
             if (items.length === 0) return null;
