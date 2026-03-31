@@ -628,8 +628,13 @@ export default function App() {
 
   // Cap tracker: sum all split amounts paid within cap year
   var totalSplitPaid = capYearLeads.reduce(function(s,l) {
-    var gross = calcCommission(l.budget, l.commission);
-    var splitAmt = l.applyplit ? Math.min(gross * 0.15, Math.max(0, 12000 - (parseFloat(l.splitPaid) || 0))) : 0;
+    // For referral-only deals, gross = incoming referral fee
+    // For regular deals, gross = commission + bonus + incoming referral
+    var gross = l.referralOnly
+      ? (parseFloat(l.incomingReferral) || 0)
+      : calcCommission(l.budget, l.commission) + (parseFloat(l.commissionBonus) || 0) + (parseFloat(l.incomingReferral) || 0);
+    var netBeforeSplit = gross - (parseFloat(l.agentReferralPaid) || 0);
+    var splitAmt = l.applyplit ? Math.min(netBeforeSplit * 0.15, Math.max(0, 12000 - (parseFloat(l.splitPaid) || 0))) : 0;
     return s + splitAmt + (parseFloat(l.splitPaid) || 0);
   }, 0);
   var capProgress = Math.min(totalSplitPaid, 12000);
