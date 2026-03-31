@@ -9,6 +9,9 @@ const LEAD_TYPES = ["Buyer","Seller","Buyer & Seller"];
 const TYPE_COLORS = { "Buyer":"#06b6d4","Seller":"#f97316","Buyer & Seller":"#a855f7" };
 const TYPE_ICONS = { "Buyer":"🏠","Seller":"🏷️","Buyer & Seller":"🔄" };
 const LEAD_SOURCES = ["Referral","Agent Referral","SOI","Social Media","Open House","Past Client","Gym","Other"];
+const SOI_OPTIONS = ["Friend","Family","Neighbor","Coworker","Church","Other"];
+const SOCIAL_OPTIONS = ["Instagram","TikTok","Facebook"];
+const PAST_CLIENT_OPTIONS = ["Buyer","Seller"];
 
 const STORAGE_KEY = "re_pipeline_v4";
 
@@ -357,8 +360,42 @@ function LeadModal(props) {
               value: ed.referralFrom || "",
               onChange: function(e) { set("referralFrom", e.target.value); },
               placeholder: ed.source === "Agent Referral" ? "Which agent referred them?" : ed.source === "Gym" ? "Who referred them from the gym?" : "Who referred them?",
-              style: iStyle
+              style: Object.assign({}, iStyle, { marginTop: 8 })
             }) : null,
+            ed.source === "SOI" ? React.createElement("div", { style: { marginTop: 8 } },
+              React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } }, "SOI Connection"),
+              React.createElement("select", { value: ed.referralFrom || "", onChange: function(e) { set("referralFrom", e.target.value); }, style: iStyle },
+                React.createElement("option", { value: "" }, "Select..."),
+                SOI_OPTIONS.map(function(o) { return React.createElement("option", { key: o, value: o }, o); })
+              )
+            ) : null,
+            ed.source === "Social Media" ? React.createElement("div", { style: { marginTop: 8 } },
+              React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } }, "Platform"),
+              React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+                SOCIAL_OPTIONS.map(function(o) {
+                  var icons = { "Instagram":"📸", "TikTok":"🎵", "Facebook":"👍" };
+                  var active = ed.referralFrom === o;
+                  return React.createElement("button", {
+                    key: o,
+                    onClick: function() { set("referralFrom", o); },
+                    style: { padding: "6px 14px", borderRadius: 20, border: "1.5px solid " + (active ? "#3b82f6" : "#1e293b"), background: active ? "#3b82f620" : "transparent", color: active ? "#3b82f6" : "#94a3b8", fontSize: 13, fontWeight: active ? 700 : 400, cursor: "pointer", fontFamily: "inherit" }
+                  }, icons[o] + " " + o);
+                })
+              )
+            ) : null,
+            ed.source === "Past Client" ? React.createElement("div", { style: { marginTop: 8 } },
+              React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } }, "Past Client Type"),
+              React.createElement("div", { style: { display: "flex", gap: 8 } },
+                PAST_CLIENT_OPTIONS.map(function(o) {
+                  var active = ed.referralFrom === o;
+                  return React.createElement("button", {
+                    key: o,
+                    onClick: function() { set("referralFrom", o); },
+                    style: { padding: "6px 14px", borderRadius: 20, border: "1.5px solid " + (active ? "#3b82f6" : "#1e293b"), background: active ? "#3b82f620" : "transparent", color: active ? "#3b82f6" : "#94a3b8", fontSize: 13, fontWeight: active ? 700 : 400, cursor: "pointer", fontFamily: "inherit" }
+                  }, o);
+                })
+              )
+            ) : null,
             ed.source === "Other" ? React.createElement("input", {
               value: ed.referralFrom || "",
               onChange: function(e) { set("referralFrom", e.target.value); },
@@ -1086,8 +1123,42 @@ export default function App() {
             value: newLead.referralFrom || "",
             onChange: function(e) { var v = e.target.value; setNewLead(function(p) { return Object.assign({}, p, { referralFrom: v }); }); },
             placeholder: newLead.source === "Agent Referral" ? "Which agent referred them?" : newLead.source === "Gym" ? "Who referred them from the gym?" : "Who referred them?",
-            style: iStyle
+            style: Object.assign({}, iStyle, { marginTop: 8 })
           }) : null,
+          newLead.source === "SOI" ? React.createElement("div", { style: { marginTop: 8 } },
+            React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } }, "SOI Connection"),
+            React.createElement("select", { value: newLead.referralFrom || "", onChange: function(e) { var v = e.target.value; setNewLead(function(p) { return Object.assign({}, p, { referralFrom: v }); }); }, style: iStyle },
+              React.createElement("option", { value: "" }, "Select..."),
+              SOI_OPTIONS.map(function(o) { return React.createElement("option", { key: o, value: o }, o); })
+            )
+          ) : null,
+          newLead.source === "Social Media" ? React.createElement("div", { style: { marginTop: 8 } },
+            React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } }, "Platform"),
+            React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+              SOCIAL_OPTIONS.map(function(o) {
+                var icons = { "Instagram":"📸", "TikTok":"🎵", "Facebook":"👍" };
+                var active = newLead.referralFrom === o;
+                return React.createElement("button", {
+                  key: o,
+                  onClick: function() { setNewLead(function(p) { return Object.assign({}, p, { referralFrom: o }); }); },
+                  style: { padding: "6px 14px", borderRadius: 20, border: "1.5px solid " + (active ? "#3b82f6" : "#1e293b"), background: active ? "#3b82f620" : "transparent", color: active ? "#3b82f6" : "#94a3b8", fontSize: 13, fontWeight: active ? 700 : 400, cursor: "pointer", fontFamily: "inherit" }
+                }, icons[o] + " " + o);
+              })
+            )
+          ) : null,
+          newLead.source === "Past Client" ? React.createElement("div", { style: { marginTop: 8 } },
+            React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } }, "Past Client Type"),
+            React.createElement("div", { style: { display: "flex", gap: 8 } },
+              PAST_CLIENT_OPTIONS.map(function(o) {
+                var active = newLead.referralFrom === o;
+                return React.createElement("button", {
+                  key: o,
+                  onClick: function() { setNewLead(function(p) { return Object.assign({}, p, { referralFrom: o }); }); },
+                  style: { padding: "6px 14px", borderRadius: 20, border: "1.5px solid " + (active ? "#3b82f6" : "#1e293b"), background: active ? "#3b82f620" : "transparent", color: active ? "#3b82f6" : "#94a3b8", fontSize: 13, fontWeight: active ? 700 : 400, cursor: "pointer", fontFamily: "inherit" }
+                }, o);
+              })
+            )
+          ) : null,
           newLead.source === "Other" ? React.createElement("input", {
             value: newLead.referralFrom || "",
             onChange: function(e) { var v = e.target.value; setNewLead(function(p) { return Object.assign({}, p, { referralFrom: v }); }); },
