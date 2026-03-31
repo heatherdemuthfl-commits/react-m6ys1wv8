@@ -59,7 +59,8 @@ function dbToLead(r) {
     cbrFee: r.cbr_fee || false,
     transactionFee: r.transaction_fee || false,
     tcFee: r.tc_fee || 0,
-    preCapEquity: r.pre_cap_equity || 0
+    preCapEquity: r.pre_cap_equity || 0,
+    closeDate: r.close_date || ""
   };
 }
 function upsertLeadToDB(lead, onSuccess, onError) {
@@ -83,7 +84,8 @@ function upsertLeadToDB(lead, onSuccess, onError) {
     cbr_fee: lead.cbrFee || false,
     transaction_fee: lead.transactionFee || false,
     tc_fee: parseFloat(lead.tcFee) || 0,
-    pre_cap_equity: parseFloat(lead.preCapEquity) || 0
+    pre_cap_equity: parseFloat(lead.preCapEquity) || 0,
+    close_date: lead.closeDate || ""
   };
   if (lead.db_id) payload.db_id = lead.db_id;
   sbFetch("leads", {
@@ -306,11 +308,11 @@ function LeadModal(props) {
         ),
         tab === "details" ? React.createElement("div", null,
           React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 } },
-            [["Name","name"],["Phone","phone"],["Email","email"],["Source","source"],["Budget ($)","budget"],["Commission (%)","commission"],["Last Contact","lastContact"]].map(function(pair) {
+            [["Name","name"],["Phone","phone"],["Email","email"],["Source","source"],["Budget ($)","budget"],["Commission (%)","commission"],["Close Date","closeDate"]].map(function(pair) {
               var label = pair[0]; var key = pair[1];
               return React.createElement("div", { key: key },
                 React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } }, label),
-                React.createElement("input", { value: ed[key] || "", onChange: function(e) { set(key, e.target.value); }, type: key === "lastContact" ? "date" : "text", style: iStyle })
+                React.createElement("input", { value: ed[key] || "", onChange: function(e) { set(key, e.target.value); }, type: key === "closeDate" ? "date" : "text", style: iStyle })
               );
             })
           ),
@@ -460,7 +462,7 @@ export default function App() {
   var typeFilterState = React.useState("All Types"); var typeFilter = typeFilterState[0]; var setTypeFilter = typeFilterState[1];
   var aiReportState = React.useState(""); var aiReport = aiReportState[0]; var setAiReport = aiReportState[1];
   var loadingReportState = React.useState(false); var loadingReport = loadingReportState[0]; var setLoadingReport = loadingReportState[1];
-  var newLeadState = React.useState({ name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr(),applyplit:false,splitPaid:0,otherFees:0,cbrFee:false,transactionFee:false,tcFee:0,preCapEquity:0 });
+  var newLeadState = React.useState({ name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr(),closeDate:"",applyplit:false,splitPaid:0,otherFees:0,cbrFee:false,transactionFee:false,tcFee:0,preCapEquity:0 });
   var newLead = newLeadState[0]; var setNewLead = newLeadState[1];
 
   // ── Load from Supabase on mount, fall back to localStorage ─────────────────
@@ -515,7 +517,7 @@ export default function App() {
     var newLeadObj = Object.assign({}, newLead, { id: tempId, budget: parseBudget(newLead.budget) || 0, commission: parseFloat(newLead.commission) || 3, tasks: [], attachments: [], aiSummary: "" });
     setLeads(function(p) { return [newLeadObj].concat(p); });
     setShowAdd(false);
-    setNewLead({ name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr(),applyplit:false,splitPaid:0,otherFees:0,cbrFee:false,transactionFee:false,tcFee:0,preCapEquity:0 });
+    setNewLead({ name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr(),closeDate:"",applyplit:false,splitPaid:0,otherFees:0,cbrFee:false,transactionFee:false,tcFee:0,preCapEquity:0 });
     upsertLeadToDB(newLeadObj, function(saved) {
       if (saved && saved.db_id) {
         setLeads(function(p) { return p.map(function(l) { return l.id === tempId ? Object.assign({}, newLeadObj, { db_id: saved.db_id }) : l; }); });
@@ -542,8 +544,35 @@ export default function App() {
   var potentialIncome = activeLeadsList.reduce(function(s,l) { return s + calcCommission(l.budget, l.commission); }, 0);
   var earnedIncome = leads.filter(function(l) { return l.stage === "Closed"; }).reduce(function(s,l) { return s + calcCommission(l.budget, l.commission); }, 0);
   var actualEarned = leads.filter(function(l) { return l.stage === "Closed"; }).reduce(function(s,l) { return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity); }, 0);
-  // Cap tracker: sum all split amounts paid across closed deals
-  var totalSplitPaid = leads.filter(function(l) { return l.stage === "Closed"; }).reduce(function(s,l) {
+  // Date helpers for cap year (July 1 - June 30) and calendar year (Jan 1 - Dec 31)
+  var now = new Date();
+  var capYearStart = now.getMonth() >= 6
+    ? new Date(now.getFullYear(), 6, 1)      // July 1 this year
+    : new Date(now.getFullYear() - 1, 6, 1); // July 1 last year
+  var calYearStart = new Date(now.getFullYear(), 0, 1); // Jan 1 this year
+  var calYearEnd = new Date(now.getFullYear(), 11, 31);
+
+  var closedLeads = leads.filter(function(l) { return l.stage === "Closed"; });
+
+  // Cap year closed deals (July - June)
+  var capYearLeads = closedLeads.filter(function(l) {
+    if (!l.closeDate) return true; // include if no date set
+    var d = new Date(l.closeDate);
+    return d >= capYearStart;
+  });
+
+  // Calendar year closed deals (Jan - Dec current year)
+  var calYearLeads = closedLeads.filter(function(l) {
+    if (!l.closeDate) return false;
+    var d = new Date(l.closeDate);
+    return d >= calYearStart && d <= calYearEnd;
+  });
+
+  var calYearRevenue = calYearLeads.reduce(function(s,l) { return s + parseBudget(l.budget); }, 0);
+  var calYearActual = calYearLeads.reduce(function(s,l) { return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity); }, 0);
+
+  // Cap tracker: sum all split amounts paid within cap year
+  var totalSplitPaid = capYearLeads.reduce(function(s,l) {
     var gross = calcCommission(l.budget, l.commission);
     var splitAmt = l.applyplit ? Math.min(gross * 0.15, Math.max(0, 12000 - (parseFloat(l.splitPaid) || 0))) : 0;
     return s + splitAmt + (parseFloat(l.splitPaid) || 0);
@@ -587,6 +616,8 @@ export default function App() {
         { label: overdueTasks ? "Overdue Tasks" : "Need Follow-Up", value: overdueTasks || urgentLeads, color: (overdueTasks || urgentLeads) > 0 ? "#ef4444" : "#10b981", icon: "⚡" },
         { label: "Gross Commission", value: fmt(earnedIncome), color: "#f59e0b", icon: "💰" },
         { label: "Actual Income", value: fmt(actualEarned), color: "#10b981", icon: "🏦" },
+        { label: new Date().getFullYear() + " Sales Volume", value: fmt(calYearRevenue), color: "#8b5cf6", icon: "📅" },
+        { label: new Date().getFullYear() + " Actual Income", value: fmt(calYearActual), color: "#10b981", icon: "🗓️" },
       ].map(function(s) {
         return React.createElement("div", { key: s.label, style: { background: "#0d1117", border: "1px solid #1e293b", borderRadius: 12, padding: "14px 16px" } },
           React.createElement("div", { style: { fontSize: 18, marginBottom: 6 } }, s.icon),
@@ -841,3 +872,4 @@ export default function App() {
     selected ? React.createElement(LeadModal, { lead: selected, onClose: function() { setSelected(null); }, onUpdate: updateLead, onDelete: deleteLead }) : null
   );
 }
+ 
