@@ -488,8 +488,13 @@ function LeadCard(props) {
           openTasks > 0 ? React.createElement("span", { style: { fontSize: 10, color: "#f59e0b", background: "#f59e0b18", padding: "2px 7px", borderRadius: 20 } }, "Tasks: " + openTasks) : null
         ),
         React.createElement("div", { style: { textAlign: "right" } },
-          React.createElement("div", { style: { fontSize: 12, color: "#10b981", fontWeight: 700 } }, fmt(lead.budget)),
-          lead.commission ? React.createElement("div", { style: { fontSize: 11, color: "#f59e0b", fontWeight: 600 } }, fmt(calcCommission(lead.budget, lead.commission)) + " comm") : null
+          React.createElement("div", { style: { fontSize: 12, color: "#10b981", fontWeight: 700 } }, lead.referralOnly ? fmt(parseFloat(lead.incomingReferral) || 0) : fmt(lead.budget)),
+          React.createElement("div", { style: { fontSize: 11, color: "#f59e0b", fontWeight: 600 } },
+            fmt(lead.referralOnly
+              ? (parseFloat(lead.incomingReferral) || 0)
+              : calcCommission(lead.budget, lead.commission) + (parseFloat(lead.commissionBonus) || 0) + (parseFloat(lead.incomingReferral) || 0)
+            ) + " comm"
+          )
         )
       )
     )
