@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
 
-const STAGES = ["New Lead","Contacted","Showing","Listing","Active Listing","Offer Made","Under Contract","Inspection","Appraisal","Financing Contingency","Clear to Close","Closed","Lost"];
+const STAGES = ["New Lead","Contacted","Showing","Listing","Active Listing","Offer Made","Under Contract","Inspection","Appraisal","Financing Contingency","Clear to Close","Closed - Cap Year","Closed - Current Year","Lost"];
 const STAGE_COLORS = {
   "New Lead":"#3b82f6","Contacted":"#8b5cf6","Showing":"#f59e0b","Listing":"#ec4899","Active Listing":"#14b8a6",
-  "Offer Made":"#ef4444","Under Contract":"#10b981","Inspection":"#f97316","Appraisal":"#eab308","Financing Contingency":"#06b6d4","Clear to Close":"#8b5cf6","Closed":"#059669","Lost":"#475569",
+  "Offer Made":"#ef4444","Under Contract":"#10b981","Inspection":"#f97316","Appraisal":"#eab308","Financing Contingency":"#06b6d4","Clear to Close":"#8b5cf6","Closed - Cap Year":"#059669","Closed - Current Year":"#10b981","Lost":"#475569",
 };
 const LEAD_TYPES = ["Buyer","Seller","Buyer & Seller"];
 const TYPE_COLORS = { "Buyer":"#06b6d4","Seller":"#f97316","Buyer & Seller":"#a855f7" };
@@ -430,7 +430,7 @@ function LeadModal(props) {
 function LeadCard(props) {
   var lead = props.lead; var onSelect = props.onSelect;
   var days = daysSince(lead.lastContact);
-  var urgent = days >= 3 && lead.stage !== "Closed" && lead.stage !== "Lost";
+  var urgent = days >= 3 && lead.stage !== "Closed - Cap Year" && lead.stage !== "Closed - Current Year" && lead.stage !== "Lost";
   var openTasks = (lead.tasks || []).filter(function(t) { return !t.done; }).length;
   return React.createElement("div", {
     onClick: function() { onSelect(lead); },
@@ -542,13 +542,13 @@ export default function App() {
   });
 
   // Active = past Contacted. Potential = Contacted only.
-  var activeLeadsList = leads.filter(function(l) { return l.stage !== "Closed" && l.stage !== "Lost" && l.stage !== "Contacted" && l.stage !== "New Lead"; });
+  var activeLeadsList = leads.filter(function(l) { return l.stage !== "Closed - Cap Year" && l.stage !== "Closed - Current Year" && l.stage !== "Lost" && l.stage !== "Contacted" && l.stage !== "New Lead"; });
   var potentialLeadsList = leads.filter(function(l) { return l.stage === "New Lead" || l.stage === "Contacted"; });
   var totalPipeline = activeLeadsList.reduce(function(s,l) { return s + parseBudget(l.budget); }, 0);
   var potentialPipeline = potentialLeadsList.reduce(function(s,l) { return s + parseBudget(l.budget); }, 0);
   var closedRevenue = leads.filter(function(l) { return l.stage === "Closed"; }).reduce(function(s,l) { return s + parseBudget(l.budget); }, 0);
   var activeLeads = activeLeadsList.length;
-  var urgentLeads = leads.filter(function(l) { return daysSince(l.lastContact) >= 3 && l.stage !== "Closed" && l.stage !== "Lost"; }).length;
+  var urgentLeads = leads.filter(function(l) { return daysSince(l.lastContact) >= 3 && l.stage !== "Closed - Cap Year" && l.stage !== "Closed - Current Year" && l.stage !== "Lost"; }).length;
   var allOpenTasks = leads.reduce(function(acc, l) { return acc.concat((l.tasks || []).filter(function(t) { return !t.done; })); }, []);
   var overdueTasks = allOpenTasks.filter(function(t) { return t.due && new Date(t.due) < new Date(); }).length;
   var potentialIncome = activeLeadsList.reduce(function(s,l) { return s + calcCommission(l.budget, l.commission); }, 0);
@@ -562,11 +562,12 @@ export default function App() {
   var calYearStart = new Date(now.getFullYear(), 0, 1); // Jan 1 this year
   var calYearEnd = new Date(now.getFullYear(), 11, 31);
 
-  var closedLeads = leads.filter(function(l) { return l.stage === "Closed"; });
+  var closedLeads = leads.filter(function(l) { return l.stage === "Closed - Cap Year" || l.stage === "Closed - Current Year"; });
 
   // Cap year closed deals (July - June) - also match by closedYear field
   var currentCapYear = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1;
   var capYearLeads = closedLeads.filter(function(l) {
+    if (l.stage === "Closed - Cap Year") return true;
     if (l.closedYear) return parseInt(l.closedYear) === currentCapYear || parseInt(l.closedYear) === currentCapYear + 1;
     if (!l.closeDate) return true;
     var d = new Date(l.closeDate);
@@ -575,6 +576,7 @@ export default function App() {
 
   // Calendar year closed deals (Jan - Dec current year)
   var calYearLeads = closedLeads.filter(function(l) {
+    if (l.stage === "Closed - Current Year") return true;
     if (!l.closeDate) return false;
     var d = new Date(l.closeDate);
     return d >= calYearStart && d <= calYearEnd;
@@ -734,7 +736,7 @@ export default function App() {
           var overdue = allTasks.filter(function(t) { return t.due && new Date(t.due) < new Date(); });
           var todayTasks = allTasks.filter(function(t) { return t.due === todayStr(); });
           var upcoming = allTasks.filter(function(t) { return t.due && t.due > todayStr(); }).sort(function(a,b) { return a.due > b.due ? 1 : -1; });
-          var cold = leads.filter(function(l) { return daysSince(l.lastContact) >= 3 && l.stage !== "Closed" && l.stage !== "Lost"; });
+          var cold = leads.filter(function(l) { return daysSince(l.lastContact) >= 3 && l.stage !== "Closed - Cap Year" && l.stage !== "Closed - Current Year" && l.stage !== "Lost"; });
 
           function Section(title, items, color) {
             if (items.length === 0) return null;
