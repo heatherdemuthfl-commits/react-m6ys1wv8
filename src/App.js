@@ -1,6 +1,4 @@
- 
-
-import React, { useState, useEffect } from "react";
+ import React, { useState, useEffect } from "react";
 
 const STAGES = ["New Lead","Contacted","Showing","Listing","Active Listing","Offer Made","Under Contract","Inspection","Appraisal","Financing Contingency","Clear to Close","Closed - Cap Year","Closed - Current Year","Closed","Lost"];
 const STAGE_COLORS = {
@@ -579,7 +577,6 @@ function LeadCard(props) {
         )
       )
     )
-    ),
     ),
     isTouchDevice ? React.createElement("button", {
       onClick: function(e) { e.stopPropagation(); setShowMove(function(v) { return !v; }); },
@@ -1233,3 +1230,4 @@ export default function App() {
     selected ? React.createElement(LeadModal, { lead: selected, onClose: function() { setSelected(null); }, onUpdate: updateLead, onDelete: deleteLead }) : null
   );
 }
+
