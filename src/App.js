@@ -122,22 +122,17 @@ const parseBudget = (n) => { if (!n && n !== 0) return 0; var s = String(n).repl
 const fmt = (n) => { var v = parseBudget(n); return v ? "$" + v.toLocaleString() : "—"; };
 const calcCommission = (budget, commission) => { var b = parseBudget(budget); var c = parseFloat(commission) || 0; return b && c ? (b * c / 100) : 0; };
 
-// customSplitAmt: if set, use that dollar amount as the broker split instead of auto-calculating 15%
+// ─── calcActualIncome now accepts customSplitAmt as final arg ────────────────
 const calcActualIncome = (budget, commission, applyplit, splitPaid, otherFees, cbrFee, transactionFee, tcFee, preCapEquity, brokerageFee, agentReferralPaid, commissionBonus, incomingReferral, referralOnly, customSplitAmt) => {
   var gross = referralOnly
     ? (parseFloat(incomingReferral) || 0)
     : calcCommission(budget, commission) + (parseFloat(commissionBonus) || 0) + (parseFloat(incomingReferral) || 0);
   var netBeforeSplit = gross - (parseFloat(agentReferralPaid) || 0);
-  var splitAmt = 0;
-  if (applyplit) {
-    if (parseFloat(customSplitAmt) > 0) {
-      // Use the override amount directly
-      splitAmt = parseFloat(customSplitAmt);
-    } else {
-      // Auto-calculate 15% capped at remaining cap
-      splitAmt = Math.min(netBeforeSplit * 0.15, Math.max(0, 12000 - (parseFloat(splitPaid) || 0)));
-    }
-  }
+  var splitAmt = applyplit
+    ? (parseFloat(customSplitAmt) > 0
+        ? parseFloat(customSplitAmt)
+        : Math.min(netBeforeSplit * 0.15, Math.max(0, 12000 - (parseFloat(splitPaid) || 0))))
+    : 0;
   var otherFeeTotal = (parseFloat(otherFees) || 0)
     + (cbrFee ? 40 : 0)
     + (transactionFee ? 285 : 0)
@@ -311,13 +306,10 @@ function LeadModal(props) {
   var openTasks = (ed.tasks || []).filter(function(t) { return !t.done; }).length;
   var iStyle = { width: "100%", background: "#111827", border: "1px solid #1e293b", borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" };
 
-  // Calculate the auto split amount for display
-  var autoSplitAmt = ed.applyplit
-    ? Math.min(
-        (ed.referralOnly ? (parseFloat(ed.incomingReferral) || 0) : calcCommission(ed.budget, ed.commission) + (parseFloat(ed.commissionBonus) || 0) + (parseFloat(ed.incomingReferral) || 0)) * 0.15,
-        Math.max(0, 12000 - (parseFloat(ed.splitPaid) || 0))
-      )
-    : 0;
+  // ── calculated split display values ────────────────────────────────────────
+  var autoSplit = Math.min(calcCommission(ed.budget, ed.commission) * 0.15, Math.max(0, 12000 - (parseFloat(ed.splitPaid) || 0)));
+  var usingOverride = parseFloat(ed.customSplitAmt) > 0;
+  var effectiveSplit = usingOverride ? parseFloat(ed.customSplitAmt) : autoSplit;
 
   return React.createElement(React.Fragment, null,
     React.createElement("div", {
@@ -443,49 +435,32 @@ function LeadModal(props) {
             React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } }, "Notes"),
             React.createElement("textarea", { value: ed.notes || "", onChange: function(e) { set("notes", e.target.value); }, rows: 3, style: Object.assign({}, iStyle, { resize: "vertical" }) })
           ),
+
+          // ── COMMISSION & FEES SECTION ─────────────────────────────────────
           React.createElement("div", { style: { background: "#111827", borderRadius: 12, padding: 16, border: "1px solid #1e293b", marginBottom: 16 } },
             React.createElement("div", { style: { fontSize: 12, color: "#10b981", fontWeight: 700, marginBottom: 12 } }, "COMMISSION & FEES"),
 
-            // ── Broker Split Row ──────────────────────────────────────────────
+            // Checkbox row + split display + override input
             React.createElement("div", { style: { marginBottom: 14 } },
-              // Checkbox row
+              // Row 1: checkbox + label + auto calc
               React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 8 } },
-                React.createElement("input", {
-                  type: "checkbox",
-                  checked: ed.applyplit || false,
-                  onChange: function(e) {
-                    set("applyplit", e.target.checked);
-                    if (!e.target.checked) set("customSplitAmt", "");
-                  },
-                  style: { accentColor: "#10b981", width: 16, height: 16, cursor: "pointer" }
-                }),
-                React.createElement("span", { style: { fontSize: 13, color: "#f1f5f9", fontWeight: 600 } }, "Apply Real Broker Split")
-              ),
-              // Split details — only shown when checkbox is checked
-              ed.applyplit ? React.createElement("div", { style: { background: "#0d1117", borderRadius: 10, padding: "12px 14px", border: "1px solid #1e293b" } },
-                // Auto-calculated line
-                React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 } },
-                  React.createElement("span", { style: { fontSize: 12, color: "#64748b" } }, "Auto (15% of net)"),
-                  React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: ed.customSplitAmt ? "#334155" : "#f59e0b", textDecoration: ed.customSplitAmt ? "line-through" : "none" } },
-                    fmt(autoSplitAmt)
-                  )
-                ),
-                // Override row
-                React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
-                  React.createElement("span", { style: { fontSize: 12, color: "#64748b", flex: 1 } }, "Override cap amount ($)"),
-                  React.createElement("input", {
-                    type: "number",
-                    value: ed.customSplitAmt || "",
-                    onChange: function(e) { set("customSplitAmt", e.target.value); },
-                    placeholder: "e.g. 450",
-                    style: { width: 110, background: "#111827", border: "1.5px solid " + (ed.customSplitAmt ? "#f59e0b" : "#334155"), borderRadius: 8, color: "#f59e0b", padding: "6px 10px", fontSize: 13, fontFamily: "inherit", textAlign: "right" }
-                  })
-                ),
-                // Active override callout
-                ed.customSplitAmt ? React.createElement("div", { style: { marginTop: 8, padding: "6px 10px", background: "#f59e0b18", borderRadius: 6, display: "flex", justifyContent: "space-between", alignItems: "center" } },
-                  React.createElement("span", { style: { fontSize: 12, color: "#f59e0b", fontWeight: 700 } }, "✓ Using override amount"),
-                  React.createElement("span", { style: { fontSize: 13, fontWeight: 800, color: "#f59e0b" } }, fmt(parseFloat(ed.customSplitAmt)))
+                React.createElement("input", { type: "checkbox", checked: ed.applyplit || false, onChange: function(e) { set("applyplit", e.target.checked); if (!e.target.checked) set("customSplitAmt", ""); }, style: { accentColor: "#10b981", width: 16, height: 16, cursor: "pointer" } }),
+                React.createElement("span", { style: { fontSize: 13, color: "#f1f5f9" } }, "Apply Real Broker Split (15%)"),
+                ed.applyplit ? React.createElement("span", { style: { fontSize: 12, color: "#f59e0b", marginLeft: 4 } },
+                  "Auto: " + fmt(autoSplit)
                 ) : null
+              ),
+              // Row 2: override field (only shows when checkbox is checked)
+              ed.applyplit ? React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, paddingLeft: 26, flexWrap: "wrap" } },
+                React.createElement("span", { style: { fontSize: 12, color: "#64748b" } }, "Cap amount override ($):"),
+                React.createElement("input", {
+                  type: "number",
+                  value: ed.customSplitAmt || "",
+                  onChange: function(e) { set("customSplitAmt", e.target.value); },
+                  placeholder: "Leave blank for auto 15%",
+                  style: { width: 180, background: "#0d1117", border: "1.5px solid " + (usingOverride ? "#f59e0b" : "#334155"), borderRadius: 8, color: "#f59e0b", padding: "6px 10px", fontSize: 13, fontFamily: "inherit" }
+                }),
+                usingOverride ? React.createElement("span", { style: { fontSize: 11, color: "#10b981", fontWeight: 700 } }, "✓ Using " + fmt(effectiveSplit) + " cap amount") : React.createElement("span", { style: { fontSize: 11, color: "#475569" } }, "Enter amount if less than full 15%")
               ) : null
             ),
 
@@ -519,6 +494,7 @@ function LeadModal(props) {
                 React.createElement("span", { style: { fontSize: 13, color: "#f1f5f9", flex: 1 } }, "Transaction Coordinator"),
                 React.createElement("select", { value: ed.tcFee || 0, onChange: function(e) { set("tcFee", parseFloat(e.target.value)); }, style: { background: "#111827", border: "1px solid #1e293b", borderRadius: 8, color: "#f1f5f9", padding: "5px 10px", fontSize: 13, fontFamily: "inherit" } },
                   React.createElement("option", { value: 0 }, "None"),
+                  React.createElement("option", { value: 125 }, "$125"),
                   React.createElement("option", { value: 250 }, "$250"),
                   React.createElement("option", { value: 275 }, "$275"),
                   React.createElement("option", { value: 350 }, "$350")
@@ -564,6 +540,7 @@ function LeadModal(props) {
               )
             )
           ),
+
           React.createElement("div", { style: { background: "#111827", borderRadius: 12, padding: 16, border: "1px solid #1e293b", marginBottom: 16 } },
             React.createElement("div", { style: { fontSize: 12, color: "#8b5cf6", fontWeight: 700, marginBottom: 12 } }, "AI ASSISTANT"),
             React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 } },
@@ -601,38 +578,38 @@ function LeadCard(props) {
 
   return React.createElement("div", { style: { position: "relative", marginBottom: 9 } },
     React.createElement("div", {
-      onClick: function() { onSelect(lead); },
-      draggable: !isTouchDevice,
-      onDragStart: function(e) { if (!isTouchDevice) { e.stopPropagation(); onDragStart(lead); } },
-      onDragEnd: onDragEnd,
-      style: { background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12, padding: "13px 15px", cursor: isTouchDevice ? "pointer" : "grab", position: "relative", overflow: "hidden" },
-      onMouseEnter: function(e) { e.currentTarget.style.borderColor = STAGE_COLORS[lead.stage] + "70"; },
-      onMouseLeave: function(e) { e.currentTarget.style.borderColor = "#1e293b"; }
-    },
-      React.createElement("div", { style: { position: "absolute", top: 0, left: 0, width: 3, height: "100%", background: STAGE_COLORS[lead.stage] } }),
-      React.createElement("div", { style: { paddingLeft: 8 } },
-        React.createElement("div", { style: { display: "flex", justifyContent: "space-between" } },
-          React.createElement("div", { style: { fontWeight: 700, color: "#f1f5f9", fontSize: 14 } }, lead.name),
-          React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 600 } }, days === 0 ? "Today" : days + "d ago")
+    onClick: function() { onSelect(lead); },
+    draggable: !isTouchDevice,
+    onDragStart: function(e) { if (!isTouchDevice) { e.stopPropagation(); onDragStart(lead); } },
+    onDragEnd: onDragEnd,
+    style: { background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12, padding: "13px 15px", cursor: isTouchDevice ? "pointer" : "grab", position: "relative", overflow: "hidden" },
+    onMouseEnter: function(e) { e.currentTarget.style.borderColor = STAGE_COLORS[lead.stage] + "70"; },
+    onMouseLeave: function(e) { e.currentTarget.style.borderColor = "#1e293b"; }
+  },
+    React.createElement("div", { style: { position: "absolute", top: 0, left: 0, width: 3, height: "100%", background: STAGE_COLORS[lead.stage] } }),
+    React.createElement("div", { style: { paddingLeft: 8 } },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between" } },
+        React.createElement("div", { style: { fontWeight: 700, color: "#f1f5f9", fontSize: 14 } }, lead.name),
+        React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 600 } }, days === 0 ? "Today" : days + "d ago")
+      ),
+      React.createElement("div", { style: { fontSize: 12, color: "#94a3b8", marginTop: 2 } }, lead.propertyInterest),
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, flexWrap: "wrap", gap: 4 } },
+        React.createElement("div", { style: { display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" } },
+          React.createElement(StageBadge, { stage: lead.stage }),
+          React.createElement(TypeBadge, { type: lead.type }),
+          openTasks > 0 ? React.createElement("span", { style: { fontSize: 10, color: "#f59e0b", background: "#f59e0b18", padding: "2px 7px", borderRadius: 20 } }, "Tasks: " + openTasks) : null
         ),
-        React.createElement("div", { style: { fontSize: 12, color: "#94a3b8", marginTop: 2 } }, lead.propertyInterest),
-        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, flexWrap: "wrap", gap: 4 } },
-          React.createElement("div", { style: { display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" } },
-            React.createElement(StageBadge, { stage: lead.stage }),
-            React.createElement(TypeBadge, { type: lead.type }),
-            openTasks > 0 ? React.createElement("span", { style: { fontSize: 10, color: "#f59e0b", background: "#f59e0b18", padding: "2px 7px", borderRadius: 20 } }, "Tasks: " + openTasks) : null
-          ),
-          React.createElement("div", { style: { textAlign: "right" } },
-            React.createElement("div", { style: { fontSize: 12, color: "#10b981", fontWeight: 700 } }, lead.referralOnly ? fmt(parseFloat(lead.incomingReferral) || 0) : fmt(lead.budget)),
-            React.createElement("div", { style: { fontSize: 11, color: "#f59e0b", fontWeight: 600 } },
-              fmt(lead.referralOnly
-                ? (parseFloat(lead.incomingReferral) || 0)
-                : calcCommission(lead.budget, lead.commission) + (parseFloat(lead.commissionBonus) || 0) + (parseFloat(lead.incomingReferral) || 0)
-              ) + " comm"
-            )
+        React.createElement("div", { style: { textAlign: "right" } },
+          React.createElement("div", { style: { fontSize: 12, color: "#10b981", fontWeight: 700 } }, lead.referralOnly ? fmt(parseFloat(lead.incomingReferral) || 0) : fmt(lead.budget)),
+          React.createElement("div", { style: { fontSize: 11, color: "#f59e0b", fontWeight: 600 } },
+            fmt(lead.referralOnly
+              ? (parseFloat(lead.incomingReferral) || 0)
+              : calcCommission(lead.budget, lead.commission) + (parseFloat(lead.commissionBonus) || 0) + (parseFloat(lead.incomingReferral) || 0)
+            ) + " comm"
           )
         )
       )
+    )
     ),
     isTouchDevice ? React.createElement("button", {
       onClick: function(e) { e.stopPropagation(); setShowMove(function(v) { return !v; }); },
@@ -670,18 +647,14 @@ export default function App() {
   var typeFilterState = React.useState("All Types"); var typeFilter = typeFilterState[0]; var setTypeFilter = typeFilterState[1];
   var aiReportState = React.useState(""); var aiReport = aiReportState[0]; var setAiReport = aiReportState[1];
   var loadingReportState = React.useState(false); var loadingReport = loadingReportState[0]; var setLoadingReport = loadingReportState[1];
-  var dragLeadState = React.useState(null); var dragLead = dragLeadState[0]; var setDragLead = dragLeadState[1];
-  var dragOverState = React.useState(null); var dragOver = dragOverState[0]; var setDragOver = dragOverState[1];
 
-  var emptyLead = {
-    name:"", phone:"", email:"", stage:"New Lead", type:"Buyer", propertyInterest:"", budget:"", commission:3,
-    source:"", notes:"", lastContact:todayStr(), closeDate:"", closedYear:"",
-    applyplit:false, customSplitAmt:"", splitPaid:0, otherFees:0,
-    cbrFee:false, transactionFee:false, tcFee:0, preCapEquity:0, brokerageFee:false,
-    agentReferralPaid:0, commissionBonus:0, incomingReferral:0, referralOnly:false, referralFrom:""
-  };
+  // ── Default new lead object including customSplitAmt ──────────────────────
+  var emptyLead = { name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr(),closeDate:"",closedYear:"",applyplit:false,customSplitAmt:"",splitPaid:0,otherFees:0,cbrFee:false,transactionFee:false,tcFee:0,preCapEquity:0,brokerageFee:false,agentReferralPaid:0,commissionBonus:0,incomingReferral:0,referralOnly:false,referralFrom:"" };
   var newLeadState = React.useState(emptyLead);
   var newLead = newLeadState[0]; var setNewLead = newLeadState[1];
+
+  var dragLeadState = React.useState(null); var dragLead = dragLeadState[0]; var setDragLead = dragLeadState[1];
+  var dragOverState = React.useState(null); var dragOver = dragOverState[0]; var setDragOver = dragOverState[1];
 
   React.useEffect(function() {
     sbFetch("leads?select=*&order=created_at.desc")
@@ -777,7 +750,8 @@ export default function App() {
   }
   function handleDragEnd() { setDragLead(null); setDragOver(null); }
   function handleMoveTo(lead, stage) {
-    updateLead(Object.assign({}, lead, { stage: stage }));
+    var updated = Object.assign({}, lead, { stage: stage });
+    updateLead(updated);
   }
 
   var filtered = leads.filter(function(l) {
@@ -805,7 +779,11 @@ export default function App() {
   var closedLeads = leads.filter(function(l) { return l.stage === "Closed - Cap Year" || l.stage === "Closed - Current Year"; });
   var closedRevenue = closedLeads.reduce(function(s,l) { return s + parseBudget(l.budget); }, 0);
   var earnedIncome = closedLeads.reduce(function(s,l) { return s + calcCommission(l.budget, l.commission) + (parseFloat(l.commissionBonus) || 0) + (parseFloat(l.incomingReferral) || 0); }, 0);
-  var actualEarned = closedLeads.reduce(function(s,l) { return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, l.agentReferralPaid, l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt); }, 0);
+
+  // ── Pass customSplitAmt to calcActualIncome everywhere ────────────────────
+  var actualEarned = closedLeads.reduce(function(s,l) {
+    return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, l.agentReferralPaid, l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt);
+  }, 0);
 
   var currentCapYear = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1;
   var capYearLeads = closedLeads.filter(function(l) {
@@ -824,22 +802,21 @@ export default function App() {
   });
 
   var calYearRevenue = calYearLeads.reduce(function(s,l) { return s + parseBudget(l.budget); }, 0);
-  var calYearActual = calYearLeads.reduce(function(s,l) { return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, l.agentReferralPaid, l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt); }, 0);
+  var calYearActual = calYearLeads.reduce(function(s,l) {
+    return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, l.agentReferralPaid, l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt);
+  }, 0);
 
-  // Cap tracker — uses customSplitAmt override when present
+  // ── Cap tracker: use customSplitAmt override when present ─────────────────
   var totalSplitPaid = capYearLeads.reduce(function(s,l) {
     var gross = l.referralOnly
       ? (parseFloat(l.incomingReferral) || 0)
       : calcCommission(l.budget, l.commission) + (parseFloat(l.commissionBonus) || 0) + (parseFloat(l.incomingReferral) || 0);
     var netBeforeSplit = gross - (parseFloat(l.agentReferralPaid) || 0);
-    var splitAmt = 0;
-    if (l.applyplit) {
-      if (parseFloat(l.customSplitAmt) > 0) {
-        splitAmt = parseFloat(l.customSplitAmt);
-      } else {
-        splitAmt = Math.min(netBeforeSplit * 0.15, Math.max(0, 12000 - (parseFloat(l.splitPaid) || 0)));
-      }
-    }
+    var splitAmt = l.applyplit
+      ? (parseFloat(l.customSplitAmt) > 0
+          ? parseFloat(l.customSplitAmt)
+          : Math.min(netBeforeSplit * 0.15, Math.max(0, 12000 - (parseFloat(l.splitPaid) || 0))))
+      : 0;
     return s + splitAmt + (parseFloat(l.splitPaid) || 0);
   }, 0);
   var capProgress = Math.min(totalSplitPaid, 12000);
@@ -859,11 +836,17 @@ export default function App() {
     var src = l.source && l.source.trim() ? l.source.trim() : "Unknown";
     sourceCounts[src] = (sourceCounts[src] || 0) + 1;
   });
-  var topSources = Object.keys(sourceCounts).map(function(k) { return { source: k, count: sourceCounts[k] }; }).sort(function(a, b) { return b.count - a.count; }).slice(0, 3);
+  var topSources = Object.keys(sourceCounts)
+    .map(function(k) { return { source: k, count: sourceCounts[k] }; })
+    .sort(function(a, b) { return b.count - a.count; })
+    .slice(0, 3);
 
   var stageCounts = {};
   allActive.forEach(function(l) { stageCounts[l.stage] = (stageCounts[l.stage] || 0) + 1; });
-  var topStages = Object.keys(stageCounts).map(function(k) { return { stage: k, count: stageCounts[k] }; }).sort(function(a, b) { return b.count - a.count; }).slice(0, 3);
+  var topStages = Object.keys(stageCounts)
+    .map(function(k) { return { stage: k, count: stageCounts[k] }; })
+    .sort(function(a, b) { return b.count - a.count; })
+    .slice(0, 3);
 
   var iStyle = { width: "100%", background: "#111827", border: "1px solid #1e293b", borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" };
 
@@ -900,8 +883,8 @@ export default function App() {
         { label: "Overdue Tasks", value: overdueTasks, color: overdueTasks > 0 ? "#ef4444" : "#10b981", icon: "⚡" },
         { label: "Gross Commission", value: fmt(earnedIncome), color: "#f59e0b", icon: "💰" },
         { label: "Actual Income", value: fmt(actualEarned), color: "#10b981", icon: "🏦" },
-        { label: now.getFullYear() + " Sales Volume", value: fmt(calYearRevenue), color: "#8b5cf6", icon: "📅" },
-        { label: now.getFullYear() + " Actual Income", value: fmt(calYearActual), color: "#10b981", icon: "🗓️" },
+        { label: new Date().getFullYear() + " Sales Volume", value: fmt(calYearRevenue), color: "#8b5cf6", icon: "📅" },
+        { label: new Date().getFullYear() + " Actual Income", value: fmt(calYearActual), color: "#10b981", icon: "🗓️" },
       ].map(function(s) {
         return React.createElement("div", { key: s.label, style: { background: "#0d1117", border: "1px solid #1e293b", borderRadius: 12, padding: "14px 16px" } },
           React.createElement("div", { style: { fontSize: 18, marginBottom: 6 } }, s.icon),
@@ -978,7 +961,13 @@ export default function App() {
         )
       ),
       React.createElement("div", { style: { background: "#1e293b", borderRadius: 6, height: 8, overflow: "hidden" } },
-        React.createElement("div", { style: { height: "100%", width: Math.round(capProgress / 12000 * 100) + "%", background: isCapped ? "#10b981" : "linear-gradient(90deg,#3b82f6,#f59e0b)", borderRadius: 6, transition: "width 0.5s" } })
+        React.createElement("div", { style: {
+          height: "100%",
+          width: Math.round(capProgress / 12000 * 100) + "%",
+          background: isCapped ? "#10b981" : "linear-gradient(90deg,#3b82f6,#f59e0b)",
+          borderRadius: 6,
+          transition: "width 0.5s"
+        }})
       )
     ),
     React.createElement("div", { style: { padding: "20px 24px" } },
@@ -1004,11 +993,7 @@ export default function App() {
           STAGES.map(function(stage) {
             var sl = filtered.filter(function(l) { return l.stage === stage; });
             if (sl.length === 0 && stageFilter !== "All") return null;
-            return React.createElement("div", { key: stage,
-              onDragOver: function(e) { handleDragOver(stage, e); },
-              onDrop: function() { handleDrop(stage); },
-              style: { background: dragOver === stage ? STAGE_COLORS[stage] + "11" : "transparent", borderRadius: 12, transition: "background 0.2s" }
-            },
+            return React.createElement("div", { key: stage },
               React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 } },
                 React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
                   React.createElement("div", { style: { width: 8, height: 8, borderRadius: "50%", background: STAGE_COLORS[stage] } }),
@@ -1139,6 +1124,7 @@ export default function App() {
       ) : null
     ),
 
+    // ── Add Lead modal ────────────────────────────────────────────────────────
     showAdd ? React.createElement("div", {
       style: { position: "fixed", inset: 0, background: "#000000aa", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 },
       onClick: function(e) { if (e.target === e.currentTarget) setShowAdd(false); }
@@ -1163,8 +1149,12 @@ export default function App() {
               return React.createElement("button", {
                 key: s,
                 onClick: function() { setNewLead(function(p) { return Object.assign({}, p, { source: s, referralFrom: s !== "Referral" ? "" : p.referralFrom }); }); },
-                style: { padding: "8px 14px", borderRadius: 20, border: "1.5px solid " + (active ? "#3b82f6" : "#1e293b"), background: active ? "#3b82f620" : "transparent", color: active ? "#3b82f6" : "#94a3b8", fontSize: 13, fontWeight: active ? 700 : 400, cursor: "pointer", fontFamily: "inherit" }
-              }, (icons[s] || "•") + " " + s);
+                style: {
+                  padding: "8px 14px", borderRadius: 20, border: "1.5px solid " + (active ? "#3b82f6" : "#1e293b"),
+                  background: active ? "#3b82f620" : "transparent", color: active ? "#3b82f6" : "#94a3b8",
+                  fontSize: 13, fontWeight: active ? 700 : 400, cursor: "pointer", fontFamily: "inherit"
+                }
+              }, icons[s] + " " + s);
             })
           ),
           (newLead.source === "Referral" || newLead.source === "Agent Referral" || newLead.source === "Gym") ? React.createElement("input", {
@@ -1174,21 +1164,38 @@ export default function App() {
             style: Object.assign({}, iStyle, { marginTop: 8 })
           }) : null,
           newLead.source === "SOI" ? React.createElement("div", { style: { marginTop: 8 } },
+            React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } }, "SOI Connection"),
             React.createElement("select", { value: newLead.referralFrom || "", onChange: function(e) { var v = e.target.value; setNewLead(function(p) { return Object.assign({}, p, { referralFrom: v }); }); }, style: iStyle },
-              React.createElement("option", { value: "" }, "Select SOI connection..."),
+              React.createElement("option", { value: "" }, "Select..."),
               SOI_OPTIONS.map(function(o) { return React.createElement("option", { key: o, value: o }, o); })
             )
           ) : null,
-          newLead.source === "Social Media" ? React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 } },
-            SOCIAL_OPTIONS.map(function(o) {
-              var icons = { "Instagram":"📸", "TikTok":"🎵", "Facebook":"👍" };
-              var active = newLead.referralFrom === o;
-              return React.createElement("button", {
-                key: o,
-                onClick: function() { setNewLead(function(p) { return Object.assign({}, p, { referralFrom: o }); }); },
-                style: { padding: "6px 14px", borderRadius: 20, border: "1.5px solid " + (active ? "#3b82f6" : "#1e293b"), background: active ? "#3b82f620" : "transparent", color: active ? "#3b82f6" : "#94a3b8", fontSize: 13, fontWeight: active ? 700 : 400, cursor: "pointer", fontFamily: "inherit" }
-              }, icons[o] + " " + o);
-            })
+          newLead.source === "Social Media" ? React.createElement("div", { style: { marginTop: 8 } },
+            React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } }, "Platform"),
+            React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+              SOCIAL_OPTIONS.map(function(o) {
+                var icons = { "Instagram":"📸", "TikTok":"🎵", "Facebook":"👍" };
+                var active = newLead.referralFrom === o;
+                return React.createElement("button", {
+                  key: o,
+                  onClick: function() { setNewLead(function(p) { return Object.assign({}, p, { referralFrom: o }); }); },
+                  style: { padding: "6px 14px", borderRadius: 20, border: "1.5px solid " + (active ? "#3b82f6" : "#1e293b"), background: active ? "#3b82f620" : "transparent", color: active ? "#3b82f6" : "#94a3b8", fontSize: 13, fontWeight: active ? 700 : 400, cursor: "pointer", fontFamily: "inherit" }
+                }, icons[o] + " " + o);
+              })
+            )
+          ) : null,
+          newLead.source === "Past Client" ? React.createElement("div", { style: { marginTop: 8 } },
+            React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } }, "Past Client Type"),
+            React.createElement("div", { style: { display: "flex", gap: 8 } },
+              PAST_CLIENT_OPTIONS.map(function(o) {
+                var active = newLead.referralFrom === o;
+                return React.createElement("button", {
+                  key: o,
+                  onClick: function() { setNewLead(function(p) { return Object.assign({}, p, { referralFrom: o }); }); },
+                  style: { padding: "6px 14px", borderRadius: 20, border: "1.5px solid " + (active ? "#3b82f6" : "#1e293b"), background: active ? "#3b82f620" : "transparent", color: active ? "#3b82f6" : "#94a3b8", fontSize: 13, fontWeight: active ? 700 : 400, cursor: "pointer", fontFamily: "inherit" }
+                }, o);
+              })
+            )
           ) : null,
           newLead.source === "Other" ? React.createElement("input", {
             value: newLead.referralFrom || "",
