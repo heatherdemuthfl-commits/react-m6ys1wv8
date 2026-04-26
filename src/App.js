@@ -15,7 +15,6 @@ const PAST_CLIENT_OPTIONS = ["Buyer","Seller","Buyer & Seller"];
 
 const STORAGE_KEY = "re_pipeline_v4";
 
-// ─── localStorage fallback ────────────────────────────────────────────────────
 function saveToLocal(leads) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(leads)); } catch(e) {}
 }
@@ -27,7 +26,6 @@ function loadFromLocal() {
   return null;
 }
 
-// ─── Supabase config ──────────────────────────────────────────────────────────
 var SUPABASE_URL = "https://tjpjyltxxdoyfhtrxesu.supabase.co";
 var SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRqcGp5bHR4eGRveWZodHJ4ZXN1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwNjg2MDcsImV4cCI6MjA4OTY0NDYwN30.JTNgTmMOAECGS-aPbf-GusoKWbJ8AT1R0xA8lc13QRo";
 var sbHeaders = {
@@ -58,6 +56,7 @@ function dbToLead(r) {
     tasks: r.tasks ? (typeof r.tasks === "string" ? JSON.parse(r.tasks) : r.tasks) : [],
     attachments: [],
     applyplit: r.applyplit || false,
+    customSplitAmt: r.custom_split_amt || "",
     splitPaid: r.split_paid || 0,
     otherFees: r.other_fees || 0,
     cbrFee: r.cbr_fee || false,
@@ -90,6 +89,7 @@ function upsertLeadToDB(lead, onSuccess, onError) {
     ai_summary: lead.aiSummary || "",
     tasks: JSON.stringify(lead.tasks || []),
     applyplit: lead.applyplit || false,
+    custom_split_amt: parseFloat(lead.customSplitAmt) || null,
     split_paid: parseFloat(lead.splitPaid) || 0,
     other_fees: parseFloat(lead.otherFees) || 0,
     cbr_fee: lead.cbrFee || false,
@@ -122,13 +122,22 @@ const parseBudget = (n) => { if (!n && n !== 0) return 0; var s = String(n).repl
 const fmt = (n) => { var v = parseBudget(n); return v ? "$" + v.toLocaleString() : "—"; };
 const calcCommission = (budget, commission) => { var b = parseBudget(budget); var c = parseFloat(commission) || 0; return b && c ? (b * c / 100) : 0; };
 
-const calcActualIncome = (budget, commission, applyplit, splitPaid, otherFees, cbrFee, transactionFee, tcFee, preCapEquity, brokerageFee, agentReferralPaid, commissionBonus, incomingReferral, referralOnly) => {
-  // If referral-only deal, skip budget/commission and use incoming referral as the gross
+// customSplitAmt: if set, use that dollar amount as the broker split instead of auto-calculating 15%
+const calcActualIncome = (budget, commission, applyplit, splitPaid, otherFees, cbrFee, transactionFee, tcFee, preCapEquity, brokerageFee, agentReferralPaid, commissionBonus, incomingReferral, referralOnly, customSplitAmt) => {
   var gross = referralOnly
     ? (parseFloat(incomingReferral) || 0)
     : calcCommission(budget, commission) + (parseFloat(commissionBonus) || 0) + (parseFloat(incomingReferral) || 0);
   var netBeforeSplit = gross - (parseFloat(agentReferralPaid) || 0);
-  var splitAmt = applyplit ? Math.min(netBeforeSplit * 0.15, Math.max(0, 12000 - (parseFloat(splitPaid) || 0))) : 0;
+  var splitAmt = 0;
+  if (applyplit) {
+    if (parseFloat(customSplitAmt) > 0) {
+      // Use the override amount directly
+      splitAmt = parseFloat(customSplitAmt);
+    } else {
+      // Auto-calculate 15% capped at remaining cap
+      splitAmt = Math.min(netBeforeSplit * 0.15, Math.max(0, 12000 - (parseFloat(splitPaid) || 0)));
+    }
+  }
   var otherFeeTotal = (parseFloat(otherFees) || 0)
     + (cbrFee ? 40 : 0)
     + (transactionFee ? 285 : 0)
@@ -137,6 +146,7 @@ const calcActualIncome = (budget, commission, applyplit, splitPaid, otherFees, c
     + (brokerageFee ? 250 : 0);
   return Math.max(netBeforeSplit - splitAmt - otherFeeTotal, 0);
 };
+
 const daysSince = (d) => Math.floor((new Date() - new Date(d)) / 86400000);
 const todayStr = () => new Date().toISOString().split("T")[0];
 
@@ -301,6 +311,14 @@ function LeadModal(props) {
   var openTasks = (ed.tasks || []).filter(function(t) { return !t.done; }).length;
   var iStyle = { width: "100%", background: "#111827", border: "1px solid #1e293b", borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" };
 
+  // Calculate the auto split amount for display
+  var autoSplitAmt = ed.applyplit
+    ? Math.min(
+        (ed.referralOnly ? (parseFloat(ed.incomingReferral) || 0) : calcCommission(ed.budget, ed.commission) + (parseFloat(ed.commissionBonus) || 0) + (parseFloat(ed.incomingReferral) || 0)) * 0.15,
+        Math.max(0, 12000 - (parseFloat(ed.splitPaid) || 0))
+      )
+    : 0;
+
   return React.createElement(React.Fragment, null,
     React.createElement("div", {
       style: { position: "fixed", inset: 0, background: "#000000aa", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 },
@@ -427,13 +445,50 @@ function LeadModal(props) {
           ),
           React.createElement("div", { style: { background: "#111827", borderRadius: 12, padding: 16, border: "1px solid #1e293b", marginBottom: 16 } },
             React.createElement("div", { style: { fontSize: 12, color: "#10b981", fontWeight: 700, marginBottom: 12 } }, "COMMISSION & FEES"),
-            React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 10 } },
-              React.createElement("input", { type: "checkbox", checked: ed.applyplit || false, onChange: function(e) { set("applyplit", e.target.checked); }, style: { accentColor: "#10b981", width: 16, height: 16, cursor: "pointer" } }),
-              React.createElement("span", { style: { fontSize: 13, color: "#f1f5f9" } }, "Apply 15% Real Broker split"),
-              ed.applyplit ? React.createElement("span", { style: { fontSize: 12, color: "#f59e0b", marginLeft: 8 } },
-                "Split: " + fmt(Math.min(calcCommission(ed.budget, ed.commission) * 0.15, Math.max(0, 12000 - (parseFloat(ed.splitPaid) || 0))))
+
+            // ── Broker Split Row ──────────────────────────────────────────────
+            React.createElement("div", { style: { marginBottom: 14 } },
+              // Checkbox row
+              React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 8 } },
+                React.createElement("input", {
+                  type: "checkbox",
+                  checked: ed.applyplit || false,
+                  onChange: function(e) {
+                    set("applyplit", e.target.checked);
+                    if (!e.target.checked) set("customSplitAmt", "");
+                  },
+                  style: { accentColor: "#10b981", width: 16, height: 16, cursor: "pointer" }
+                }),
+                React.createElement("span", { style: { fontSize: 13, color: "#f1f5f9", fontWeight: 600 } }, "Apply Real Broker Split")
+              ),
+              // Split details — only shown when checkbox is checked
+              ed.applyplit ? React.createElement("div", { style: { background: "#0d1117", borderRadius: 10, padding: "12px 14px", border: "1px solid #1e293b" } },
+                // Auto-calculated line
+                React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 } },
+                  React.createElement("span", { style: { fontSize: 12, color: "#64748b" } }, "Auto (15% of net)"),
+                  React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: ed.customSplitAmt ? "#334155" : "#f59e0b", textDecoration: ed.customSplitAmt ? "line-through" : "none" } },
+                    fmt(autoSplitAmt)
+                  )
+                ),
+                // Override row
+                React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
+                  React.createElement("span", { style: { fontSize: 12, color: "#64748b", flex: 1 } }, "Override cap amount ($)"),
+                  React.createElement("input", {
+                    type: "number",
+                    value: ed.customSplitAmt || "",
+                    onChange: function(e) { set("customSplitAmt", e.target.value); },
+                    placeholder: "e.g. 450",
+                    style: { width: 110, background: "#111827", border: "1.5px solid " + (ed.customSplitAmt ? "#f59e0b" : "#334155"), borderRadius: 8, color: "#f59e0b", padding: "6px 10px", fontSize: 13, fontFamily: "inherit", textAlign: "right" }
+                  })
+                ),
+                // Active override callout
+                ed.customSplitAmt ? React.createElement("div", { style: { marginTop: 8, padding: "6px 10px", background: "#f59e0b18", borderRadius: 6, display: "flex", justifyContent: "space-between", alignItems: "center" } },
+                  React.createElement("span", { style: { fontSize: 12, color: "#f59e0b", fontWeight: 700 } }, "✓ Using override amount"),
+                  React.createElement("span", { style: { fontSize: 13, fontWeight: 800, color: "#f59e0b" } }, fmt(parseFloat(ed.customSplitAmt)))
+                ) : null
               ) : null
             ),
+
             React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 6 } },
               React.createElement("div", null,
                 React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } }, "Split already paid toward cap ($)"),
@@ -504,7 +559,9 @@ function LeadModal(props) {
             ),
             React.createElement("div", { style: { background: "#0d1117", borderRadius: 8, padding: "10px 14px", display: "flex", justifyContent: "space-between", marginTop: 4 } },
               React.createElement("span", { style: { fontSize: 13, color: "#64748b" } }, "Actual income (after split & fees)"),
-              React.createElement("span", { style: { fontSize: 14, fontWeight: 800, color: "#10b981" } }, fmt(calcActualIncome(ed.budget, ed.commission, ed.applyplit, ed.splitPaid, ed.otherFees, ed.cbrFee, ed.transactionFee, ed.tcFee, ed.preCapEquity, ed.brokerageFee, ed.agentReferralPaid, ed.commissionBonus, ed.incomingReferral, ed.referralOnly)))
+              React.createElement("span", { style: { fontSize: 14, fontWeight: 800, color: "#10b981" } },
+                fmt(calcActualIncome(ed.budget, ed.commission, ed.applyplit, ed.splitPaid, ed.otherFees, ed.cbrFee, ed.transactionFee, ed.tcFee, ed.preCapEquity, ed.brokerageFee, ed.agentReferralPaid, ed.commissionBonus, ed.incomingReferral, ed.referralOnly, ed.customSplitAmt))
+              )
             )
           ),
           React.createElement("div", { style: { background: "#111827", borderRadius: 12, padding: 16, border: "1px solid #1e293b", marginBottom: 16 } },
@@ -538,45 +595,44 @@ function LeadCard(props) {
   var onDragStart = props.onDragStart; var onDragEnd = props.onDragEnd;
   var onMoveTo = props.onMoveTo;
   var days = daysSince(lead.lastContact);
-  var urgent = false; // follow-up alerts removed
   var openTasks = (lead.tasks || []).filter(function(t) { return !t.done; }).length;
   var showMoveState = React.useState(false); var showMove = showMoveState[0]; var setShowMove = showMoveState[1];
   var isTouchDevice = typeof window !== "undefined" && ("ontouchstart" in window || navigator.maxTouchPoints > 0);
 
   return React.createElement("div", { style: { position: "relative", marginBottom: 9 } },
     React.createElement("div", {
-    onClick: function() { onSelect(lead); },
-    draggable: !isTouchDevice,
-    onDragStart: function(e) { if (!isTouchDevice) { e.stopPropagation(); onDragStart(lead); } },
-    onDragEnd: onDragEnd,
-    style: { background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12, padding: "13px 15px", cursor: isTouchDevice ? "pointer" : "grab", position: "relative", overflow: "hidden" },
-    onMouseEnter: function(e) { e.currentTarget.style.borderColor = STAGE_COLORS[lead.stage] + "70"; },
-    onMouseLeave: function(e) { e.currentTarget.style.borderColor = "#1e293b"; }
-  },
-    React.createElement("div", { style: { position: "absolute", top: 0, left: 0, width: 3, height: "100%", background: STAGE_COLORS[lead.stage] } }),
-    React.createElement("div", { style: { paddingLeft: 8 } },
-      React.createElement("div", { style: { display: "flex", justifyContent: "space-between" } },
-        React.createElement("div", { style: { fontWeight: 700, color: "#f1f5f9", fontSize: 14 } }, lead.name),
-        React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 600 } }, days === 0 ? "Today" : days + "d ago")
-      ),
-      React.createElement("div", { style: { fontSize: 12, color: "#94a3b8", marginTop: 2 } }, lead.propertyInterest),
-      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, flexWrap: "wrap", gap: 4 } },
-        React.createElement("div", { style: { display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" } },
-          React.createElement(StageBadge, { stage: lead.stage }),
-          React.createElement(TypeBadge, { type: lead.type }),
-          openTasks > 0 ? React.createElement("span", { style: { fontSize: 10, color: "#f59e0b", background: "#f59e0b18", padding: "2px 7px", borderRadius: 20 } }, "Tasks: " + openTasks) : null
+      onClick: function() { onSelect(lead); },
+      draggable: !isTouchDevice,
+      onDragStart: function(e) { if (!isTouchDevice) { e.stopPropagation(); onDragStart(lead); } },
+      onDragEnd: onDragEnd,
+      style: { background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12, padding: "13px 15px", cursor: isTouchDevice ? "pointer" : "grab", position: "relative", overflow: "hidden" },
+      onMouseEnter: function(e) { e.currentTarget.style.borderColor = STAGE_COLORS[lead.stage] + "70"; },
+      onMouseLeave: function(e) { e.currentTarget.style.borderColor = "#1e293b"; }
+    },
+      React.createElement("div", { style: { position: "absolute", top: 0, left: 0, width: 3, height: "100%", background: STAGE_COLORS[lead.stage] } }),
+      React.createElement("div", { style: { paddingLeft: 8 } },
+        React.createElement("div", { style: { display: "flex", justifyContent: "space-between" } },
+          React.createElement("div", { style: { fontWeight: 700, color: "#f1f5f9", fontSize: 14 } }, lead.name),
+          React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 600 } }, days === 0 ? "Today" : days + "d ago")
         ),
-        React.createElement("div", { style: { textAlign: "right" } },
-          React.createElement("div", { style: { fontSize: 12, color: "#10b981", fontWeight: 700 } }, lead.referralOnly ? fmt(parseFloat(lead.incomingReferral) || 0) : fmt(lead.budget)),
-          React.createElement("div", { style: { fontSize: 11, color: "#f59e0b", fontWeight: 600 } },
-            fmt(lead.referralOnly
-              ? (parseFloat(lead.incomingReferral) || 0)
-              : calcCommission(lead.budget, lead.commission) + (parseFloat(lead.commissionBonus) || 0) + (parseFloat(lead.incomingReferral) || 0)
-            ) + " comm"
+        React.createElement("div", { style: { fontSize: 12, color: "#94a3b8", marginTop: 2 } }, lead.propertyInterest),
+        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, flexWrap: "wrap", gap: 4 } },
+          React.createElement("div", { style: { display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" } },
+            React.createElement(StageBadge, { stage: lead.stage }),
+            React.createElement(TypeBadge, { type: lead.type }),
+            openTasks > 0 ? React.createElement("span", { style: { fontSize: 10, color: "#f59e0b", background: "#f59e0b18", padding: "2px 7px", borderRadius: 20 } }, "Tasks: " + openTasks) : null
+          ),
+          React.createElement("div", { style: { textAlign: "right" } },
+            React.createElement("div", { style: { fontSize: 12, color: "#10b981", fontWeight: 700 } }, lead.referralOnly ? fmt(parseFloat(lead.incomingReferral) || 0) : fmt(lead.budget)),
+            React.createElement("div", { style: { fontSize: 11, color: "#f59e0b", fontWeight: 600 } },
+              fmt(lead.referralOnly
+                ? (parseFloat(lead.incomingReferral) || 0)
+                : calcCommission(lead.budget, lead.commission) + (parseFloat(lead.commissionBonus) || 0) + (parseFloat(lead.incomingReferral) || 0)
+              ) + " comm"
+            )
           )
         )
       )
-    )
     ),
     isTouchDevice ? React.createElement("button", {
       onClick: function(e) { e.stopPropagation(); setShowMove(function(v) { return !v; }); },
@@ -614,12 +670,19 @@ export default function App() {
   var typeFilterState = React.useState("All Types"); var typeFilter = typeFilterState[0]; var setTypeFilter = typeFilterState[1];
   var aiReportState = React.useState(""); var aiReport = aiReportState[0]; var setAiReport = aiReportState[1];
   var loadingReportState = React.useState(false); var loadingReport = loadingReportState[0]; var setLoadingReport = loadingReportState[1];
-  var newLeadState = React.useState({ name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr(),closeDate:"",closedYear:"",applyplit:false,splitPaid:0,otherFees:0,cbrFee:false,transactionFee:false,tcFee:0,preCapEquity:0,brokerageFee:false,agentReferralPaid:0,commissionBonus:0,incomingReferral:0,referralOnly:false,referralFrom:"" });
   var dragLeadState = React.useState(null); var dragLead = dragLeadState[0]; var setDragLead = dragLeadState[1];
   var dragOverState = React.useState(null); var dragOver = dragOverState[0]; var setDragOver = dragOverState[1];
+
+  var emptyLead = {
+    name:"", phone:"", email:"", stage:"New Lead", type:"Buyer", propertyInterest:"", budget:"", commission:3,
+    source:"", notes:"", lastContact:todayStr(), closeDate:"", closedYear:"",
+    applyplit:false, customSplitAmt:"", splitPaid:0, otherFees:0,
+    cbrFee:false, transactionFee:false, tcFee:0, preCapEquity:0, brokerageFee:false,
+    agentReferralPaid:0, commissionBonus:0, incomingReferral:0, referralOnly:false, referralFrom:""
+  };
+  var newLeadState = React.useState(emptyLead);
   var newLead = newLeadState[0]; var setNewLead = newLeadState[1];
 
-  // ── Load from Supabase on mount, fall back to localStorage ─────────────────
   React.useEffect(function() {
     sbFetch("leads?select=*&order=created_at.desc")
       .then(function(r) { return r.json(); })
@@ -647,32 +710,27 @@ export default function App() {
       });
   }, []);
 
-  // ── Keep localStorage in sync as backup ─────────────────────────────────────
   React.useEffect(function() {
     if (loaded) saveToLocal(leads);
   }, [leads, loaded]);
 
-  // ── Auto-archive old Closed - Cap Year leads ──────────────────────────────
   React.useEffect(function() {
     if (!loaded) return;
     var now = new Date();
-    // Current cap year starts July 1
     var capStart = now.getMonth() >= 6
       ? new Date(now.getFullYear(), 6, 1)
       : new Date(now.getFullYear() - 1, 6, 1);
-
     var toArchive = leads.filter(function(l) {
       if (l.stage !== "Closed - Cap Year") return false;
-      if (!l.closeDate) return false; // only auto-archive if close date is set
+      if (!l.closeDate) return false;
       return new Date(l.closeDate) < capStart;
     });
-
     if (toArchive.length > 0) {
       setLeads(function(prev) {
         return prev.map(function(l) {
           if (toArchive.find(function(a) { return a.id === l.id; })) {
             var updated = Object.assign({}, l, { stage: "Closed" });
-            upsertLeadToDB(updated); // save to Supabase
+            upsertLeadToDB(updated);
             return updated;
           }
           return l;
@@ -700,7 +758,7 @@ export default function App() {
     var newLeadObj = Object.assign({}, newLead, { id: tempId, budget: parseBudget(newLead.budget) || 0, commission: parseFloat(newLead.commission) || 3, tasks: [], attachments: [], aiSummary: "" });
     setLeads(function(p) { return [newLeadObj].concat(p); });
     setShowAdd(false);
-    setNewLead({ name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr(),closeDate:"",closedYear:"",applyplit:false,splitPaid:0,otherFees:0,cbrFee:false,transactionFee:false,tcFee:0,preCapEquity:0,brokerageFee:false,agentReferralPaid:0,commissionBonus:0,incomingReferral:0,referralOnly:false,referralFrom:"" });
+    setNewLead(emptyLead);
     upsertLeadToDB(newLeadObj, function(saved) {
       if (saved && saved.db_id) {
         setLeads(function(p) { return p.map(function(l) { return l.id === tempId ? Object.assign({}, newLeadObj, { db_id: saved.db_id }) : l; }); });
@@ -719,8 +777,7 @@ export default function App() {
   }
   function handleDragEnd() { setDragLead(null); setDragOver(null); }
   function handleMoveTo(lead, stage) {
-    var updated = Object.assign({}, lead, { stage: stage });
-    updateLead(updated);
+    updateLead(Object.assign({}, lead, { stage: stage }));
   }
 
   var filtered = leads.filter(function(l) {
@@ -729,30 +786,27 @@ export default function App() {
       (typeFilter === "All Types" || l.type === typeFilter);
   });
 
-  // Active = past Contacted. Potential = Contacted only.
   var activeLeadsList = leads.filter(function(l) { return l.stage !== "Closed - Cap Year" && l.stage !== "Closed - Current Year" && l.stage !== "Closed" && l.stage !== "Lost" && l.stage !== "Contacted" && l.stage !== "New Lead"; });
   var potentialLeadsList = leads.filter(function(l) { return l.stage === "New Lead" || l.stage === "Contacted"; });
   var totalPipeline = activeLeadsList.reduce(function(s,l) { return s + parseBudget(l.budget); }, 0);
   var potentialPipeline = potentialLeadsList.reduce(function(s,l) { return s + parseBudget(l.budget); }, 0);
   var activeLeads = activeLeadsList.length;
-  var urgentLeads = 0; // follow-up alerts removed
   var allOpenTasks = leads.reduce(function(acc, l) { return acc.concat((l.tasks || []).filter(function(t) { return !t.done; })); }, []);
   var overdueTasks = allOpenTasks.filter(function(t) { return t.due && new Date(t.due) < new Date(); }).length;
   var potentialIncome = activeLeadsList.reduce(function(s,l) { return s + calcCommission(l.budget, l.commission); }, 0);
-  // Date helpers for cap year (July 1 - June 30) and calendar year (Jan 1 - Dec 31)
+
   var now = new Date();
   var capYearStart = now.getMonth() >= 6
-    ? new Date(now.getFullYear(), 6, 1)      // July 1 this year
-    : new Date(now.getFullYear() - 1, 6, 1); // July 1 last year
-  var calYearStart = new Date(now.getFullYear(), 0, 1); // Jan 1 this year
+    ? new Date(now.getFullYear(), 6, 1)
+    : new Date(now.getFullYear() - 1, 6, 1);
+  var calYearStart = new Date(now.getFullYear(), 0, 1);
   var calYearEnd = new Date(now.getFullYear(), 11, 31);
 
   var closedLeads = leads.filter(function(l) { return l.stage === "Closed - Cap Year" || l.stage === "Closed - Current Year"; });
   var closedRevenue = closedLeads.reduce(function(s,l) { return s + parseBudget(l.budget); }, 0);
   var earnedIncome = closedLeads.reduce(function(s,l) { return s + calcCommission(l.budget, l.commission) + (parseFloat(l.commissionBonus) || 0) + (parseFloat(l.incomingReferral) || 0); }, 0);
-  var actualEarned = closedLeads.reduce(function(s,l) { return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, l.agentReferralPaid, l.commissionBonus, l.incomingReferral, l.referralOnly); }, 0);
+  var actualEarned = closedLeads.reduce(function(s,l) { return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, l.agentReferralPaid, l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt); }, 0);
 
-  // Cap year closed deals (July - June) - also match by closedYear field
   var currentCapYear = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1;
   var capYearLeads = closedLeads.filter(function(l) {
     if (l.stage === "Closed - Cap Year") return true;
@@ -762,7 +816,6 @@ export default function App() {
     return d >= capYearStart;
   });
 
-  // Calendar year closed deals (Jan - Dec current year)
   var calYearLeads = closedLeads.filter(function(l) {
     if (l.stage === "Closed - Current Year") return true;
     if (!l.closeDate) return false;
@@ -771,23 +824,27 @@ export default function App() {
   });
 
   var calYearRevenue = calYearLeads.reduce(function(s,l) { return s + parseBudget(l.budget); }, 0);
-  var calYearActual = calYearLeads.reduce(function(s,l) { return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, l.agentReferralPaid, l.commissionBonus, l.incomingReferral, l.referralOnly); }, 0);
+  var calYearActual = calYearLeads.reduce(function(s,l) { return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, l.agentReferralPaid, l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt); }, 0);
 
-  // Cap tracker: sum all split amounts paid within cap year
+  // Cap tracker — uses customSplitAmt override when present
   var totalSplitPaid = capYearLeads.reduce(function(s,l) {
-    // For referral-only deals, gross = incoming referral fee
-    // For regular deals, gross = commission + bonus + incoming referral
     var gross = l.referralOnly
       ? (parseFloat(l.incomingReferral) || 0)
       : calcCommission(l.budget, l.commission) + (parseFloat(l.commissionBonus) || 0) + (parseFloat(l.incomingReferral) || 0);
     var netBeforeSplit = gross - (parseFloat(l.agentReferralPaid) || 0);
-    var splitAmt = l.applyplit ? Math.min(netBeforeSplit * 0.15, Math.max(0, 12000 - (parseFloat(l.splitPaid) || 0))) : 0;
+    var splitAmt = 0;
+    if (l.applyplit) {
+      if (parseFloat(l.customSplitAmt) > 0) {
+        splitAmt = parseFloat(l.customSplitAmt);
+      } else {
+        splitAmt = Math.min(netBeforeSplit * 0.15, Math.max(0, 12000 - (parseFloat(l.splitPaid) || 0)));
+      }
+    }
     return s + splitAmt + (parseFloat(l.splitPaid) || 0);
   }, 0);
   var capProgress = Math.min(totalSplitPaid, 12000);
   var isCapped = capProgress >= 12000;
 
-  // ── Buyer / Seller breakdown ───────────────────────────────────────────────
   var allActive = leads.filter(function(l) { return l.stage !== "Lost"; });
   var totalLeads = allActive.length;
   var buyerCount = allActive.filter(function(l) { return l.type === "Buyer"; }).length;
@@ -797,28 +854,20 @@ export default function App() {
   var sellerPct = totalLeads ? Math.round(sellerCount / totalLeads * 100) : 0;
   var bothPct = totalLeads ? Math.round(bothCount / totalLeads * 100) : 0;
 
-  // ── Top lead sources ───────────────────────────────────────────────────────
   var sourceCounts = {};
   allActive.forEach(function(l) {
     var src = l.source && l.source.trim() ? l.source.trim() : "Unknown";
     sourceCounts[src] = (sourceCounts[src] || 0) + 1;
   });
-  var topSources = Object.keys(sourceCounts)
-    .map(function(k) { return { source: k, count: sourceCounts[k] }; })
-    .sort(function(a, b) { return b.count - a.count; })
-    .slice(0, 3);
+  var topSources = Object.keys(sourceCounts).map(function(k) { return { source: k, count: sourceCounts[k] }; }).sort(function(a, b) { return b.count - a.count; }).slice(0, 3);
 
-  // ── Top stages by lead count ───────────────────────────────────────────────
   var stageCounts = {};
   allActive.forEach(function(l) { stageCounts[l.stage] = (stageCounts[l.stage] || 0) + 1; });
-  var topStages = Object.keys(stageCounts)
-    .map(function(k) { return { stage: k, count: stageCounts[k] }; })
-    .sort(function(a, b) { return b.count - a.count; })
-    .slice(0, 3);
+  var topStages = Object.keys(stageCounts).map(function(k) { return { stage: k, count: stageCounts[k] }; }).sort(function(a, b) { return b.count - a.count; }).slice(0, 3);
+
   var iStyle = { width: "100%", background: "#111827", border: "1px solid #1e293b", borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" };
 
   return React.createElement("div", { style: { minHeight: "100vh", background: "#060b14", fontFamily: "'Segoe UI',sans-serif", color: "#f1f5f9" } },
-    // ── Header ──────────────────────────────────────────────────────────────
     React.createElement("div", { style: { borderBottom: "1px solid #1e293b", padding: "14px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#0d1117", flexWrap: "wrap", gap: 10 } },
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
         React.createElement("div", { style: { width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg,#3b82f6,#6366f1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 } }, "🏡"),
@@ -842,7 +891,6 @@ export default function App() {
         React.createElement("button", { onClick: function() { setShowAdd(true); }, style: { background: "linear-gradient(135deg,#3b82f6,#6366f1)", color: "#fff", border: "none", borderRadius: 10, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" } }, "+ Add Lead")
       )
     ),
-    // ── Stats bar ────────────────────────────────────────────────────────────
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 12, padding: "16px 24px", borderBottom: "1px solid #1e293b" } },
       [
         { label: "Active Leads", value: activeLeads, color: "#3b82f6", icon: "👥" },
@@ -852,8 +900,8 @@ export default function App() {
         { label: "Overdue Tasks", value: overdueTasks, color: overdueTasks > 0 ? "#ef4444" : "#10b981", icon: "⚡" },
         { label: "Gross Commission", value: fmt(earnedIncome), color: "#f59e0b", icon: "💰" },
         { label: "Actual Income", value: fmt(actualEarned), color: "#10b981", icon: "🏦" },
-        { label: new Date().getFullYear() + " Sales Volume", value: fmt(calYearRevenue), color: "#8b5cf6", icon: "📅" },
-        { label: new Date().getFullYear() + " Actual Income", value: fmt(calYearActual), color: "#10b981", icon: "🗓️" },
+        { label: now.getFullYear() + " Sales Volume", value: fmt(calYearRevenue), color: "#8b5cf6", icon: "📅" },
+        { label: now.getFullYear() + " Actual Income", value: fmt(calYearActual), color: "#10b981", icon: "🗓️" },
       ].map(function(s) {
         return React.createElement("div", { key: s.label, style: { background: "#0d1117", border: "1px solid #1e293b", borderRadius: 12, padding: "14px 16px" } },
           React.createElement("div", { style: { fontSize: 18, marginBottom: 6 } }, s.icon),
@@ -862,7 +910,6 @@ export default function App() {
         );
       })
     ),
-    // ── Buyer/Seller breakdown bar ───────────────────────────────────────────
     React.createElement("div", { style: { padding: "12px 24px", borderBottom: "1px solid #1e293b", background: "#0d1117", display: "flex", gap: 24, flexWrap: "wrap", alignItems: "center" } },
       React.createElement("div", { style: { flex: 1, minWidth: 200 } },
         React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 5 } },
@@ -870,9 +917,9 @@ export default function App() {
           React.createElement("span", { style: { fontSize: 11, color: "#64748b" } }, totalLeads + " total")
         ),
         React.createElement("div", { style: { display: "flex", height: 8, borderRadius: 6, overflow: "hidden", gap: 1 } },
-          buyerPct > 0 ? React.createElement("div", { style: { width: buyerPct + "%", background: "#06b6d4" }, title: "Buyers " + buyerPct + "%" }) : null,
-          sellerPct > 0 ? React.createElement("div", { style: { width: sellerPct + "%", background: "#f97316" }, title: "Sellers " + sellerPct + "%" }) : null,
-          bothPct > 0 ? React.createElement("div", { style: { width: bothPct + "%", background: "#a855f7" }, title: "Both " + bothPct + "%" }) : null
+          buyerPct > 0 ? React.createElement("div", { style: { width: buyerPct + "%", background: "#06b6d4" } }) : null,
+          sellerPct > 0 ? React.createElement("div", { style: { width: sellerPct + "%", background: "#f97316" } }) : null,
+          bothPct > 0 ? React.createElement("div", { style: { width: bothPct + "%", background: "#a855f7" } }) : null
         ),
         React.createElement("div", { style: { display: "flex", gap: 14, marginTop: 6 } },
           React.createElement("span", { style: { fontSize: 11, color: "#06b6d4" } }, "🏠 Buyers " + buyerPct + "% (" + buyerCount + ")"),
@@ -920,7 +967,6 @@ export default function App() {
             })
       )
     ),
-    // ── Cap tracker bar ──────────────────────────────────────────────────────
     React.createElement("div", { style: { padding: "12px 24px", borderBottom: "1px solid #1e293b", background: "#0d1117" } },
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
@@ -932,18 +978,10 @@ export default function App() {
         )
       ),
       React.createElement("div", { style: { background: "#1e293b", borderRadius: 6, height: 8, overflow: "hidden" } },
-        React.createElement("div", { style: {
-          height: "100%",
-          width: Math.round(capProgress / 12000 * 100) + "%",
-          background: isCapped ? "#10b981" : "linear-gradient(90deg,#3b82f6,#f59e0b)",
-          borderRadius: 6,
-          transition: "width 0.5s"
-        }})
+        React.createElement("div", { style: { height: "100%", width: Math.round(capProgress / 12000 * 100) + "%", background: isCapped ? "#10b981" : "linear-gradient(90deg,#3b82f6,#f59e0b)", borderRadius: 6, transition: "width 0.5s" } })
       )
     ),
-    // ── Main content ─────────────────────────────────────────────────────────
     React.createElement("div", { style: { padding: "20px 24px" } },
-      // Empty state
       !loaded ? React.createElement("div", { style: { textAlign: "center", padding: "60px 0", color: "#64748b" } }, "Loading...") :
       leads.length === 0 && view === "pipeline" ? React.createElement("div", { style: { textAlign: "center", padding: "80px 24px" } },
         React.createElement("div", { style: { fontSize: 48, marginBottom: 16 } }, "🏡"),
@@ -952,7 +990,6 @@ export default function App() {
         React.createElement("button", { onClick: function() { setShowAdd(true); }, style: { background: "linear-gradient(135deg,#3b82f6,#6366f1)", color: "#fff", border: "none", borderRadius: 10, padding: "12px 28px", fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" } }, "+ Add Your First Lead")
       ) : null,
 
-      // Pipeline view
       view === "pipeline" && leads.length > 0 ? React.createElement("div", null,
         React.createElement("div", { style: { display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" } },
           React.createElement("input", { value: search, onChange: function(e) { setSearch(e.target.value); }, placeholder: "Search leads...", style: Object.assign({}, iStyle, { flex: 1, minWidth: 160 }) }),
@@ -967,7 +1004,11 @@ export default function App() {
           STAGES.map(function(stage) {
             var sl = filtered.filter(function(l) { return l.stage === stage; });
             if (sl.length === 0 && stageFilter !== "All") return null;
-            return React.createElement("div", { key: stage },
+            return React.createElement("div", { key: stage,
+              onDragOver: function(e) { handleDragOver(stage, e); },
+              onDrop: function() { handleDrop(stage); },
+              style: { background: dragOver === stage ? STAGE_COLORS[stage] + "11" : "transparent", borderRadius: 12, transition: "background 0.2s" }
+            },
               React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 } },
                 React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
                   React.createElement("div", { style: { width: 8, height: 8, borderRadius: "50%", background: STAGE_COLORS[stage] } }),
@@ -975,14 +1016,13 @@ export default function App() {
                 ),
                 React.createElement("span", { style: { fontSize: 11, background: "#1e293b", color: "#64748b", padding: "2px 8px", borderRadius: 20, fontWeight: 600 } }, sl.length)
               ),
-              sl.map(function(l) { return React.createElement(LeadCard, { key: l.id, lead: l, onSelect: setSelected }); }),
+              sl.map(function(l) { return React.createElement(LeadCard, { key: l.id, lead: l, onSelect: setSelected, onDragStart: handleDragStart, onDragEnd: handleDragEnd, onMoveTo: handleMoveTo }); }),
               sl.length === 0 ? React.createElement("div", { style: { fontSize: 12, color: "#334155", textAlign: "center", padding: "20px 0", border: "1px dashed #1e293b", borderRadius: 10 } }, "Empty") : null
             );
           })
         )
       ) : null,
 
-      // Contacts view
       view === "contacts" ? React.createElement("div", null,
         React.createElement("input", { value: search, onChange: function(e) { setSearch(e.target.value); }, placeholder: "Search...", style: Object.assign({}, iStyle, { marginBottom: 16 }) }),
         leads.length === 0 ? React.createElement("div", { style: { textAlign: "center", padding: "40px 0", color: "#64748b" } }, "No leads yet. Add one from the Pipeline tab!") :
@@ -1009,14 +1049,12 @@ export default function App() {
         )
       ) : null,
 
-      // Reminders view
       view === "reminders" ? React.createElement("div", null,
         (function() {
           var allTasks = leads.reduce(function(acc, l) { return acc.concat((l.tasks || []).filter(function(t) { return !t.done; }).map(function(t) { return Object.assign({}, t, { leadName: l.name, lead: l }); })); }, []);
           var overdue = allTasks.filter(function(t) { return t.due && new Date(t.due) < new Date(); });
           var todayTasks = allTasks.filter(function(t) { return t.due === todayStr(); });
           var upcoming = allTasks.filter(function(t) { return t.due && t.due > todayStr(); }).sort(function(a,b) { return a.due > b.due ? 1 : -1; });
-          var cold = []; // follow-up alerts removed
 
           function Section(title, items, color) {
             if (items.length === 0) return null;
@@ -1038,27 +1076,11 @@ export default function App() {
             Section("Overdue", overdue, "#ef4444"),
             Section("Due Today", todayTasks, "#f59e0b"),
             Section("Upcoming", upcoming.slice(0,5), "#3b82f6"),
-            cold.length > 0 ? React.createElement("div", { style: { marginBottom: 20 } },
-              React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "#8b5cf6", marginBottom: 8, textTransform: "uppercase" } }, "Going Cold (" + cold.length + ")"),
-              cold.map(function(l) {
-                return React.createElement("div", { key: l.id, onClick: function() { setSelected(l); }, style: { background: "#0d1117", border: "1px solid #8b5cf630", borderRadius: 10, padding: "10px 13px", marginBottom: 6, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" } },
-                  React.createElement("div", null,
-                    React.createElement("div", { style: { fontSize: 13, color: "#f1f5f9", fontWeight: 600 } }, l.name),
-                    React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 4 } },
-                      React.createElement(TypeBadge, { type: l.type }),
-                      React.createElement("span", { style: { fontSize: 11, color: "#64748b" } }, l.stage)
-                    )
-                  ),
-                  React.createElement("div", { style: { fontSize: 11, color: "#ef4444", fontWeight: 700 } }, daysSince(l.lastContact) + "d ago")
-                );
-              })
-            ) : null,
-            allTasks.length === 0 && cold.length === 0 ? React.createElement("div", { style: { textAlign: "center", padding: "40px 0", color: "#334155", fontSize: 13 } }, "All caught up!") : null
+            allTasks.length === 0 ? React.createElement("div", { style: { textAlign: "center", padding: "40px 0", color: "#334155", fontSize: 13 } }, "All caught up!") : null
           );
         })()
       ) : null,
 
-      // Forecast view
       view === "forecast" ? React.createElement("div", null,
         React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 20 } },
           LEAD_TYPES.map(function(type) {
@@ -1117,7 +1139,6 @@ export default function App() {
       ) : null
     ),
 
-    // ── Add Lead modal ────────────────────────────────────────────────────────
     showAdd ? React.createElement("div", {
       style: { position: "fixed", inset: 0, background: "#000000aa", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 },
       onClick: function(e) { if (e.target === e.currentTarget) setShowAdd(false); }
@@ -1137,17 +1158,13 @@ export default function App() {
           React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 8, textTransform: "uppercase" } }, "Lead Source"),
           React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 } },
             LEAD_SOURCES.map(function(s) {
-              var icons = { "Referral":"🤝", "SOI":"👥", "Social Media":"📱", "Open House":"🏠", "Past Client":"⭐", "Other":"✏️" };
+              var icons = { "Referral":"🤝", "SOI":"👥", "Social Media":"📱", "Open House":"🏠", "Past Client":"⭐", "Other":"✏️", "Agent Referral":"🏡", "Gym":"💪" };
               var active = newLead.source === s;
               return React.createElement("button", {
                 key: s,
                 onClick: function() { setNewLead(function(p) { return Object.assign({}, p, { source: s, referralFrom: s !== "Referral" ? "" : p.referralFrom }); }); },
-                style: {
-                  padding: "8px 14px", borderRadius: 20, border: "1.5px solid " + (active ? "#3b82f6" : "#1e293b"),
-                  background: active ? "#3b82f620" : "transparent", color: active ? "#3b82f6" : "#94a3b8",
-                  fontSize: 13, fontWeight: active ? 700 : 400, cursor: "pointer", fontFamily: "inherit"
-                }
-              }, icons[s] + " " + s);
+                style: { padding: "8px 14px", borderRadius: 20, border: "1.5px solid " + (active ? "#3b82f6" : "#1e293b"), background: active ? "#3b82f620" : "transparent", color: active ? "#3b82f6" : "#94a3b8", fontSize: 13, fontWeight: active ? 700 : 400, cursor: "pointer", fontFamily: "inherit" }
+              }, (icons[s] || "•") + " " + s);
             })
           ),
           (newLead.source === "Referral" || newLead.source === "Agent Referral" || newLead.source === "Gym") ? React.createElement("input", {
@@ -1157,38 +1174,21 @@ export default function App() {
             style: Object.assign({}, iStyle, { marginTop: 8 })
           }) : null,
           newLead.source === "SOI" ? React.createElement("div", { style: { marginTop: 8 } },
-            React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } }, "SOI Connection"),
             React.createElement("select", { value: newLead.referralFrom || "", onChange: function(e) { var v = e.target.value; setNewLead(function(p) { return Object.assign({}, p, { referralFrom: v }); }); }, style: iStyle },
-              React.createElement("option", { value: "" }, "Select..."),
+              React.createElement("option", { value: "" }, "Select SOI connection..."),
               SOI_OPTIONS.map(function(o) { return React.createElement("option", { key: o, value: o }, o); })
             )
           ) : null,
-          newLead.source === "Social Media" ? React.createElement("div", { style: { marginTop: 8 } },
-            React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } }, "Platform"),
-            React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
-              SOCIAL_OPTIONS.map(function(o) {
-                var icons = { "Instagram":"📸", "TikTok":"🎵", "Facebook":"👍" };
-                var active = newLead.referralFrom === o;
-                return React.createElement("button", {
-                  key: o,
-                  onClick: function() { setNewLead(function(p) { return Object.assign({}, p, { referralFrom: o }); }); },
-                  style: { padding: "6px 14px", borderRadius: 20, border: "1.5px solid " + (active ? "#3b82f6" : "#1e293b"), background: active ? "#3b82f620" : "transparent", color: active ? "#3b82f6" : "#94a3b8", fontSize: 13, fontWeight: active ? 700 : 400, cursor: "pointer", fontFamily: "inherit" }
-                }, icons[o] + " " + o);
-              })
-            )
-          ) : null,
-          newLead.source === "Past Client" ? React.createElement("div", { style: { marginTop: 8 } },
-            React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } }, "Past Client Type"),
-            React.createElement("div", { style: { display: "flex", gap: 8 } },
-              PAST_CLIENT_OPTIONS.map(function(o) {
-                var active = newLead.referralFrom === o;
-                return React.createElement("button", {
-                  key: o,
-                  onClick: function() { setNewLead(function(p) { return Object.assign({}, p, { referralFrom: o }); }); },
-                  style: { padding: "6px 14px", borderRadius: 20, border: "1.5px solid " + (active ? "#3b82f6" : "#1e293b"), background: active ? "#3b82f620" : "transparent", color: active ? "#3b82f6" : "#94a3b8", fontSize: 13, fontWeight: active ? 700 : 400, cursor: "pointer", fontFamily: "inherit" }
-                }, o);
-              })
-            )
+          newLead.source === "Social Media" ? React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 } },
+            SOCIAL_OPTIONS.map(function(o) {
+              var icons = { "Instagram":"📸", "TikTok":"🎵", "Facebook":"👍" };
+              var active = newLead.referralFrom === o;
+              return React.createElement("button", {
+                key: o,
+                onClick: function() { setNewLead(function(p) { return Object.assign({}, p, { referralFrom: o }); }); },
+                style: { padding: "6px 14px", borderRadius: 20, border: "1.5px solid " + (active ? "#3b82f6" : "#1e293b"), background: active ? "#3b82f620" : "transparent", color: active ? "#3b82f6" : "#94a3b8", fontSize: 13, fontWeight: active ? 700 : 400, cursor: "pointer", fontFamily: "inherit" }
+              }, icons[o] + " " + o);
+            })
           ) : null,
           newLead.source === "Other" ? React.createElement("input", {
             value: newLead.referralFrom || "",
@@ -1226,7 +1226,6 @@ export default function App() {
       )
     ) : null,
 
-    // ── Lead detail modal ─────────────────────────────────────────────────────
     selected ? React.createElement(LeadModal, { lead: selected, onClose: function() { setSelected(null); }, onUpdate: updateLead, onDelete: deleteLead }) : null
   );
 }
