@@ -39,7 +39,7 @@ function sbFetch(path, options) {
 }
 function dbToLead(r) {
   return {
-    id: r.db_id || r.id || Date.now(),
+    id: r.db_id,
     db_id: r.db_id,
     name: r.name || "",
     type: r.type || "Buyer",
@@ -73,7 +73,7 @@ function dbToLead(r) {
     referralFrom: r.referral_from || ""
   };
 }
-function upsertLeadToDB(lead, onSuccess, onError) {
+function leadToPayload(lead) {
   var payload = {
     name: lead.name || "",
     type: lead.type || "Buyer",
@@ -106,23 +106,42 @@ function upsertLeadToDB(lead, onSuccess, onError) {
     referral_from: lead.referralFrom || ""
   };
   if (lead.db_id) payload.db_id = lead.db_id;
-  sbFetch("leads", {
+  return payload;
+}
+function insertLeadToDB(lead) {
+  var payload = leadToPayload(lead);
+  delete payload.db_id;
+  return sbFetch("leads", {
     method: "POST",
-    headers: Object.assign({}, sbHeaders, { "Prefer": "return=representation,resolution=merge-duplicates" }),
     body: JSON.stringify(payload)
-  }).then(function(r) { return r.json(); })
-    .then(function(data) { onSuccess && onSuccess(Array.isArray(data) ? data[0] : data); })
-    .catch(onError || function() {});
+  }).then(function(r) {
+    if (!r.ok) throw new Error("Insert failed: " + r.status);
+    return r.json();
+  }).then(function(data) {
+    return Array.isArray(data) ? data[0] : data;
+  });
+}
+function updateLeadInDB(dbId, lead) {
+  var payload = leadToPayload(lead);
+  delete payload.db_id;
+  return sbFetch("leads?db_id=eq." + dbId, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  }).then(function(r) {
+    if (!r.ok) throw new Error("Update failed: " + r.status);
+    return r.json();
+  }).then(function(data) {
+    return Array.isArray(data) ? data[0] : data;
+  });
 }
 function deleteLeadFromDB(dbId) {
-  sbFetch("leads?db_id=eq." + dbId, { method: "DELETE" }).catch(function() {});
+  return sbFetch("leads?db_id=eq." + dbId, { method: "DELETE" }).catch(function() {});
 }
 
 const parseBudget = (n) => { if (!n && n !== 0) return 0; var s = String(n).replace(/[$,\s]/g, ""); return parseFloat(s) || 0; };
 const fmt = (n) => { var v = parseBudget(n); return v ? "$" + v.toLocaleString() : "—"; };
 const calcCommission = (budget, commission) => { var b = parseBudget(budget); var c = parseFloat(commission) || 0; return b && c ? (b * c / 100) : 0; };
 
-// ─── calcActualIncome now accepts customSplitAmt as final arg ────────────────
 const calcActualIncome = (budget, commission, applyplit, splitPaid, otherFees, cbrFee, transactionFee, tcFee, preCapEquity, brokerageFee, agentReferralPaid, commissionBonus, incomingReferral, referralOnly, customSplitAmt) => {
   var gross = referralOnly
     ? (parseFloat(incomingReferral) || 0)
@@ -306,7 +325,6 @@ function LeadModal(props) {
   var openTasks = (ed.tasks || []).filter(function(t) { return !t.done; }).length;
   var iStyle = { width: "100%", background: "#111827", border: "1px solid #1e293b", borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" };
 
-  // ── calculated split display values ────────────────────────────────────────
   var autoSplit = Math.min(calcCommission(ed.budget, ed.commission) * 0.15, Math.max(0, 12000 - (parseFloat(ed.splitPaid) || 0)));
   var usingOverride = parseFloat(ed.customSplitAmt) > 0;
   var effectiveSplit = usingOverride ? parseFloat(ed.customSplitAmt) : autoSplit;
@@ -436,13 +454,9 @@ function LeadModal(props) {
             React.createElement("textarea", { value: ed.notes || "", onChange: function(e) { set("notes", e.target.value); }, rows: 3, style: Object.assign({}, iStyle, { resize: "vertical" }) })
           ),
 
-          // ── COMMISSION & FEES SECTION ─────────────────────────────────────
           React.createElement("div", { style: { background: "#111827", borderRadius: 12, padding: 16, border: "1px solid #1e293b", marginBottom: 16 } },
             React.createElement("div", { style: { fontSize: 12, color: "#10b981", fontWeight: 700, marginBottom: 12 } }, "COMMISSION & FEES"),
-
-            // Checkbox row + split display + override input
             React.createElement("div", { style: { marginBottom: 14 } },
-              // Row 1: checkbox + label + auto calc
               React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 8 } },
                 React.createElement("input", { type: "checkbox", checked: ed.applyplit || false, onChange: function(e) { set("applyplit", e.target.checked); if (!e.target.checked) set("customSplitAmt", ""); }, style: { accentColor: "#10b981", width: 16, height: 16, cursor: "pointer" } }),
                 React.createElement("span", { style: { fontSize: 13, color: "#f1f5f9" } }, "Apply Real Broker Split (15%)"),
@@ -450,7 +464,6 @@ function LeadModal(props) {
                   "Auto: " + fmt(autoSplit)
                 ) : null
               ),
-              // Row 2: override field (only shows when checkbox is checked)
               ed.applyplit ? React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, paddingLeft: 26, flexWrap: "wrap" } },
                 React.createElement("span", { style: { fontSize: 12, color: "#64748b" } }, "Cap amount override ($):"),
                 React.createElement("input", {
@@ -463,7 +476,6 @@ function LeadModal(props) {
                 usingOverride ? React.createElement("span", { style: { fontSize: 11, color: "#10b981", fontWeight: 700 } }, "✓ Using " + fmt(effectiveSplit) + " cap amount") : React.createElement("span", { style: { fontSize: 11, color: "#475569" } }, "Enter amount if less than full 15%")
               ) : null
             ),
-
             React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 6 } },
               React.createElement("div", null,
                 React.createElement("div", { style: { fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4, textTransform: "uppercase" } }, "Split already paid toward cap ($)"),
@@ -639,6 +651,7 @@ export default function App() {
   var leadsState = React.useState([]);
   var leads = leadsState[0]; var setLeads = leadsState[1];
   var loadedState = React.useState(false); var loaded = loadedState[0]; var setLoaded = loadedState[1];
+  var dbStatusState = React.useState("connecting"); var dbStatus = dbStatusState[0]; var setDbStatus = dbStatusState[1];
   var selectedState = React.useState(null); var selected = selectedState[0]; var setSelected = selectedState[1];
   var showAddState = React.useState(false); var showAdd = showAddState[0]; var setShowAdd = showAddState[1];
   var viewState = React.useState("pipeline"); var view = viewState[0]; var setView = viewState[1];
@@ -647,8 +660,8 @@ export default function App() {
   var typeFilterState = React.useState("All Types"); var typeFilter = typeFilterState[0]; var setTypeFilter = typeFilterState[1];
   var aiReportState = React.useState(""); var aiReport = aiReportState[0]; var setAiReport = aiReportState[1];
   var loadingReportState = React.useState(false); var loadingReport = loadingReportState[0]; var setLoadingReport = loadingReportState[1];
+  var savingState = React.useState(false); var saving = savingState[0]; var setSaving = savingState[1];
 
-  // ── Default new lead object including customSplitAmt ──────────────────────
   var emptyLead = { name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr(),closeDate:"",closedYear:"",applyplit:false,customSplitAmt:"",splitPaid:0,otherFees:0,cbrFee:false,transactionFee:false,tcFee:0,preCapEquity:0,brokerageFee:false,agentReferralPaid:0,commissionBonus:0,incomingReferral:0,referralOnly:false,referralFrom:"" };
   var newLeadState = React.useState(emptyLead);
   var newLead = newLeadState[0]; var setNewLead = newLeadState[1];
@@ -656,37 +669,47 @@ export default function App() {
   var dragLeadState = React.useState(null); var dragLead = dragLeadState[0]; var setDragLead = dragLeadState[1];
   var dragOverState = React.useState(null); var dragOver = dragOverState[0]; var setDragOver = dragOverState[1];
 
+  // ── LOAD: always try Supabase first, fall back to localStorage ────────────
   React.useEffect(function() {
     sbFetch("leads?select=*&order=created_at.desc")
-      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
       .then(function(data) {
-        if (Array.isArray(data) && data.length > 0) {
-          var mapped = data.map(dbToLead);
-          setLeads(mapped);
-          saveToLocal(mapped);
-        } else if (Array.isArray(data) && data.length === 0) {
-          var local = loadFromLocal();
-          if (local && local.length > 0) {
-            setLeads(local);
-            local.forEach(function(l) { upsertLeadToDB(l); });
+        if (Array.isArray(data)) {
+          setDbStatus("connected");
+          if (data.length > 0) {
+            var mapped = data.map(dbToLead);
+            setLeads(mapped);
+            saveToLocal(mapped);
+          } else {
+            var local = loadFromLocal();
+            if (local && local.length > 0) {
+              setLeads(local);
+              local.forEach(function(l) { insertLeadToDB(l).catch(function(){}); });
+            }
           }
         } else {
-          var local2 = loadFromLocal();
-          if (local2) setLeads(local2);
+          throw new Error("Not an array");
         }
         setLoaded(true);
       })
-      .catch(function() {
+      .catch(function(err) {
+        console.error("Supabase load failed:", err);
+        setDbStatus("offline");
         var local3 = loadFromLocal();
         if (local3) setLeads(local3);
         setLoaded(true);
       });
   }, []);
 
+  // ── Always save to localStorage as backup ─────────────────────────────────
   React.useEffect(function() {
     if (loaded) saveToLocal(leads);
   }, [leads, loaded]);
 
+  // ── Auto-archive old cap year leads ───────────────────────────────────────
   React.useEffect(function() {
     if (!loaded) return;
     var now = new Date();
@@ -703,7 +726,7 @@ export default function App() {
         return prev.map(function(l) {
           if (toArchive.find(function(a) { return a.id === l.id; })) {
             var updated = Object.assign({}, l, { stage: "Closed" });
-            upsertLeadToDB(updated);
+            if (updated.db_id) updateLeadInDB(updated.db_id, updated).catch(function(){});
             return updated;
           }
           return l;
@@ -712,31 +735,50 @@ export default function App() {
     }
   }, [loaded]);
 
+  // ── UPDATE lead: save to state + Supabase ─────────────────────────────────
   function updateLead(u) {
+    setSaving(true);
     setLeads(function(p) { return p.map(function(l) { return l.id === u.id ? u : l; }); });
-    upsertLeadToDB(u, function(saved) {
-      if (saved && saved.db_id) {
-        setLeads(function(p) { return p.map(function(l) { return l.id === u.id ? Object.assign({}, u, { db_id: saved.db_id }) : l; }); });
-      }
-    });
+    if (u.db_id) {
+      updateLeadInDB(u.db_id, u)
+        .then(function() { setSaving(false); setDbStatus("connected"); })
+        .catch(function(err) { console.error("Save failed:", err); setSaving(false); setDbStatus("save-error"); });
+    } else {
+      insertLeadToDB(u)
+        .then(function(saved) {
+          if (saved && saved.db_id) {
+            setLeads(function(p) { return p.map(function(l) { return l.id === u.id ? Object.assign({}, u, { id: saved.db_id, db_id: saved.db_id }) : l; }); });
+          }
+          setSaving(false); setDbStatus("connected");
+        })
+        .catch(function(err) { console.error("Save failed:", err); setSaving(false); setDbStatus("save-error"); });
+    }
   }
+
+  // ── DELETE lead ───────────────────────────────────────────────────────────
   function deleteLead(id) {
     var lead = leads.find(function(l) { return l.id === id; });
     setLeads(function(p) { return p.filter(function(l) { return l.id !== id; }); });
     if (lead && lead.db_id) deleteLeadFromDB(lead.db_id);
   }
+
+  // ── ADD lead ──────────────────────────────────────────────────────────────
   function addLead() {
     if (!newLead.name.trim()) return;
-    var tempId = Date.now();
+    var tempId = "temp_" + Date.now();
     var newLeadObj = Object.assign({}, newLead, { id: tempId, budget: parseBudget(newLead.budget) || 0, commission: parseFloat(newLead.commission) || 3, tasks: [], attachments: [], aiSummary: "" });
     setLeads(function(p) { return [newLeadObj].concat(p); });
     setShowAdd(false);
     setNewLead(emptyLead);
-    upsertLeadToDB(newLeadObj, function(saved) {
-      if (saved && saved.db_id) {
-        setLeads(function(p) { return p.map(function(l) { return l.id === tempId ? Object.assign({}, newLeadObj, { db_id: saved.db_id }) : l; }); });
-      }
-    });
+    setSaving(true);
+    insertLeadToDB(newLeadObj)
+      .then(function(saved) {
+        if (saved && saved.db_id) {
+          setLeads(function(p) { return p.map(function(l) { return l.id === tempId ? Object.assign({}, newLeadObj, { id: saved.db_id, db_id: saved.db_id }) : l; }); });
+        }
+        setSaving(false); setDbStatus("connected");
+      })
+      .catch(function(err) { console.error("Add failed:", err); setSaving(false); setDbStatus("save-error"); });
   }
 
   function handleDragStart(lead) { setDragLead(lead); }
@@ -780,7 +822,6 @@ export default function App() {
   var closedRevenue = closedLeads.reduce(function(s,l) { return s + parseBudget(l.budget); }, 0);
   var earnedIncome = closedLeads.reduce(function(s,l) { return s + calcCommission(l.budget, l.commission) + (parseFloat(l.commissionBonus) || 0) + (parseFloat(l.incomingReferral) || 0); }, 0);
 
-  // ── Pass customSplitAmt to calcActualIncome everywhere ────────────────────
   var actualEarned = closedLeads.reduce(function(s,l) {
     return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, l.agentReferralPaid, l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt);
   }, 0);
@@ -806,7 +847,6 @@ export default function App() {
     return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, l.agentReferralPaid, l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt);
   }, 0);
 
-  // ── Cap tracker: use customSplitAmt override when present ─────────────────
   var totalSplitPaid = capYearLeads.reduce(function(s,l) {
     var gross = l.referralOnly
       ? (parseFloat(l.incomingReferral) || 0)
@@ -850,13 +890,20 @@ export default function App() {
 
   var iStyle = { width: "100%", background: "#111827", border: "1px solid #1e293b", borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" };
 
+  // ── DB status indicator colors ────────────────────────────────────────────
+  var statusColor = dbStatus === "connected" ? "#10b981" : dbStatus === "connecting" ? "#f59e0b" : dbStatus === "save-error" ? "#ef4444" : "#ef4444";
+  var statusText = dbStatus === "connected" ? (saving ? "Saving..." : "Cloud Synced") : dbStatus === "connecting" ? "Connecting..." : dbStatus === "save-error" ? "Save failed - retrying..." : "Offline - using local storage";
+
   return React.createElement("div", { style: { minHeight: "100vh", background: "#060b14", fontFamily: "'Segoe UI',sans-serif", color: "#f1f5f9" } },
     React.createElement("div", { style: { borderBottom: "1px solid #1e293b", padding: "14px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#0d1117", flexWrap: "wrap", gap: 10 } },
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
         React.createElement("div", { style: { width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg,#3b82f6,#6366f1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 } }, "🏡"),
         React.createElement("div", null,
           React.createElement("div", { style: { fontWeight: 800, fontSize: 18, color: "#f8fafc" } }, "Pipeline Pro"),
-          React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, "Residential Real Estate CRM")
+          React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
+            React.createElement("div", { style: { width: 6, height: 6, borderRadius: "50%", background: statusColor } }),
+            React.createElement("span", { style: { fontSize: 11, color: statusColor } }, statusText)
+          )
         )
       ),
       React.createElement("div", { style: { display: "flex", gap: 4 } },
@@ -1124,7 +1171,6 @@ export default function App() {
       ) : null
     ),
 
-    // ── Add Lead modal ────────────────────────────────────────────────────────
     showAdd ? React.createElement("div", {
       style: { position: "fixed", inset: 0, background: "#000000aa", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 },
       onClick: function(e) { if (e.target === e.currentTarget) setShowAdd(false); }
