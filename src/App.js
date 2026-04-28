@@ -35,7 +35,19 @@ var sbHeaders = {
   "Prefer": "return=representation"
 };
 function sbFetch(path, options) {
-  return fetch(SUPABASE_URL + "/rest/v1/" + path, Object.assign({ headers: sbHeaders }, options || {}));
+  var merged = Object.assign({ headers: sbHeaders }, options || {});
+  if (merged.headers !== sbHeaders) {
+    merged.headers = Object.assign({}, sbHeaders, merged.headers);
+  }
+  return fetch(SUPABASE_URL + "/rest/v1/" + path, merged).then(function(r) {
+    if (!r.ok) {
+      return r.text().then(function(body) {
+        console.error("Supabase error " + r.status + " on " + path + ":", body);
+        throw new Error("HTTP " + r.status + ": " + body);
+      });
+    }
+    return r;
+  });
 }
 function dbToLead(r) {
   return {
@@ -115,7 +127,6 @@ function insertLeadToDB(lead) {
     method: "POST",
     body: JSON.stringify(payload)
   }).then(function(r) {
-    if (!r.ok) throw new Error("Insert failed: " + r.status);
     return r.json();
   }).then(function(data) {
     return Array.isArray(data) ? data[0] : data;
@@ -128,7 +139,6 @@ function updateLeadInDB(dbId, lead) {
     method: "PATCH",
     body: JSON.stringify(payload)
   }).then(function(r) {
-    if (!r.ok) throw new Error("Update failed: " + r.status);
     return r.json();
   }).then(function(data) {
     return Array.isArray(data) ? data[0] : data;
@@ -652,6 +662,7 @@ export default function App() {
   var leads = leadsState[0]; var setLeads = leadsState[1];
   var loadedState = React.useState(false); var loaded = loadedState[0]; var setLoaded = loadedState[1];
   var dbStatusState = React.useState("connecting"); var dbStatus = dbStatusState[0]; var setDbStatus = dbStatusState[1];
+  var dbErrorState = React.useState(""); var dbError = dbErrorState[0]; var setDbError = dbErrorState[1];
   var selectedState = React.useState(null); var selected = selectedState[0]; var setSelected = selectedState[1];
   var showAddState = React.useState(false); var showAdd = showAddState[0]; var setShowAdd = showAddState[1];
   var viewState = React.useState("pipeline"); var view = viewState[0]; var setView = viewState[1];
@@ -673,7 +684,6 @@ export default function App() {
   React.useEffect(function() {
     sbFetch("leads?select=*&order=created_at.desc")
       .then(function(r) {
-        if (!r.ok) throw new Error("HTTP " + r.status);
         return r.json();
       })
       .then(function(data) {
@@ -696,7 +706,7 @@ export default function App() {
         setLoaded(true);
       })
       .catch(function(err) {
-        console.error("Supabase load failed:", err);
+        console.error("Supabase load failed:", err); setDbError(err.message || "Unknown error");
         setDbStatus("offline");
         var local3 = loadFromLocal();
         if (local3) setLeads(local3);
@@ -742,7 +752,7 @@ export default function App() {
     if (u.db_id) {
       updateLeadInDB(u.db_id, u)
         .then(function() { setSaving(false); setDbStatus("connected"); })
-        .catch(function(err) { console.error("Save failed:", err); setSaving(false); setDbStatus("save-error"); });
+        .catch(function(err) { console.error("Save failed:", err); setSaving(false); setDbStatus("save-error"); setDbError(err.message || "Unknown error"); });
     } else {
       insertLeadToDB(u)
         .then(function(saved) {
@@ -751,7 +761,7 @@ export default function App() {
           }
           setSaving(false); setDbStatus("connected");
         })
-        .catch(function(err) { console.error("Save failed:", err); setSaving(false); setDbStatus("save-error"); });
+        .catch(function(err) { console.error("Save failed:", err); setSaving(false); setDbStatus("save-error"); setDbError(err.message || "Unknown error"); });
     }
   }
 
@@ -778,7 +788,7 @@ export default function App() {
         }
         setSaving(false); setDbStatus("connected");
       })
-      .catch(function(err) { console.error("Add failed:", err); setSaving(false); setDbStatus("save-error"); });
+      .catch(function(err) { console.error("Add failed:", err); setSaving(false); setDbStatus("save-error"); setDbError(err.message || "Unknown error"); });
   }
 
   function handleDragStart(lead) { setDragLead(lead); }
@@ -892,7 +902,7 @@ export default function App() {
 
   // ── DB status indicator colors ────────────────────────────────────────────
   var statusColor = dbStatus === "connected" ? "#10b981" : dbStatus === "connecting" ? "#f59e0b" : dbStatus === "save-error" ? "#ef4444" : "#ef4444";
-  var statusText = dbStatus === "connected" ? (saving ? "Saving..." : "Cloud Synced") : dbStatus === "connecting" ? "Connecting..." : dbStatus === "save-error" ? "Save failed - retrying..." : "Offline - using local storage";
+  var statusText = dbStatus === "connected" ? (saving ? "Saving..." : "Cloud Synced") : dbStatus === "connecting" ? "Connecting..." : dbStatus === "save-error" ? ("Save failed" + (dbError ? ": " + dbError.substring(0, 60) : "")) : ("Offline" + (dbError ? ": " + dbError.substring(0, 60) : ""));
 
   return React.createElement("div", { style: { minHeight: "100vh", background: "#060b14", fontFamily: "'Segoe UI',sans-serif", color: "#f1f5f9" } },
     React.createElement("div", { style: { borderBottom: "1px solid #1e293b", padding: "14px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#0d1117", flexWrap: "wrap", gap: 10 } },
