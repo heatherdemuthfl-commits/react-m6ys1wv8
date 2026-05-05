@@ -1200,8 +1200,8 @@ export default function App() {
             var d = new Date(l.closeDate);
             return d.getFullYear() === currentYear;
           });
-          var actualTransactions = closedThisYear.length;
-          var actualVolume = closedThisYear.reduce(function(s, l) { return s + parseBudget(l.budget); }, 0);
+          var actualTransactions = closedThisYear.filter(function(l) { return !l.referralOnly; }).length;
+          var actualVolume = closedThisYear.filter(function(l) { return !l.referralOnly; }).reduce(function(s, l) { return s + parseBudget(l.budget); }, 0);
           var actualIncome = closedThisYear.reduce(function(s, l) {
             return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, l.agentReferralPaid, l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt);
           }, 0);
@@ -1281,8 +1281,8 @@ export default function App() {
                     var d = new Date(l.closeDate);
                     return d.getFullYear() === currentYear && d.getMonth() === idx;
                   });
-                  var mActualTx = monthLeads.length;
-                  var mActualVol = monthLeads.reduce(function(s, l) { return s + parseBudget(l.budget); }, 0);
+                  var mActualTx = monthLeads.filter(function(l) { return !l.referralOnly; }).length;
+                  var mActualVol = monthLeads.filter(function(l) { return !l.referralOnly; }).reduce(function(s, l) { return s + parseBudget(l.budget); }, 0);
                   var mActualInc = monthLeads.reduce(function(s, l) {
                     return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, l.agentReferralPaid, l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt);
                   }, 0);
