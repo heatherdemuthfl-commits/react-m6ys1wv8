@@ -673,6 +673,17 @@ export default function App() {
   var loadingReportState = React.useState(false); var loadingReport = loadingReportState[0]; var setLoadingReport = loadingReportState[1];
   var savingState = React.useState(false); var saving = savingState[0]; var setSaving = savingState[1];
 
+  // ── Goals state ───────────────────────────────────────────────────────────
+  var MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  var currentYear = new Date().getFullYear();
+  var currentMonth = new Date().getMonth();
+  var defaultGoals = { annual_transactions: 0, annual_income: 0, annual_volume: 0, monthly_transactions: {}, monthly_income: {}, monthly_volume: {} };
+  var goalsState = React.useState(defaultGoals);
+  var goals = goalsState[0]; var setGoals = goalsState[1];
+  var goalsDbId = React.useState(null);
+  var goalsId = goalsDbId[0]; var setGoalsId = goalsDbId[1];
+  var editingGoalsState = React.useState(false); var editingGoals = editingGoalsState[0]; var setEditingGoals = editingGoalsState[1];
+
   var emptyLead = { name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr(),closeDate:"",closedYear:"",applyplit:false,customSplitAmt:"",splitPaid:0,otherFees:0,cbrFee:false,transactionFee:false,tcFee:0,preCapEquity:0,brokerageFee:false,agentReferralPaid:0,commissionBonus:0,incomingReferral:0,referralOnly:false,referralFrom:"" };
   var newLeadState = React.useState(emptyLead);
   var newLead = newLeadState[0]; var setNewLead = newLeadState[1];
@@ -718,6 +729,52 @@ export default function App() {
   React.useEffect(function() {
     if (loaded) saveToLocal(leads);
   }, [leads, loaded]);
+
+  // ── Load goals from Supabase ──────────────────────────────────────────────
+  React.useEffect(function() {
+    sbFetch("goals?year=eq." + currentYear + "&select=*")
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (Array.isArray(data) && data.length > 0) {
+          var g = data[0];
+          setGoalsId(g.id);
+          setGoals({
+            annual_transactions: g.annual_transactions || 0,
+            annual_income: g.annual_income || 0,
+            annual_volume: g.annual_volume || 0,
+            monthly_transactions: g.monthly_transactions || {},
+            monthly_income: g.monthly_income || {},
+            monthly_volume: g.monthly_volume || {}
+          });
+        }
+      })
+      .catch(function(err) { console.error("Goals load failed:", err); });
+  }, []);
+
+  function saveGoals(updatedGoals) {
+    setGoals(updatedGoals);
+    var payload = {
+      year: currentYear,
+      annual_transactions: parseInt(updatedGoals.annual_transactions) || 0,
+      annual_income: parseFloat(updatedGoals.annual_income) || 0,
+      annual_volume: parseFloat(updatedGoals.annual_volume) || 0,
+      monthly_transactions: updatedGoals.monthly_transactions || {},
+      monthly_income: updatedGoals.monthly_income || {},
+      monthly_volume: updatedGoals.monthly_volume || {}
+    };
+    if (goalsId) {
+      sbFetch("goals?id=eq." + goalsId, { method: "PATCH", body: JSON.stringify(payload) })
+        .catch(function(err) { console.error("Goals save failed:", err); });
+    } else {
+      sbFetch("goals", { method: "POST", body: JSON.stringify(payload) })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          var saved = Array.isArray(data) ? data[0] : data;
+          if (saved && saved.id) setGoalsId(saved.id);
+        })
+        .catch(function(err) { console.error("Goals save failed:", err); });
+    }
+  }
 
   // ── Auto-archive old cap year leads ───────────────────────────────────────
   React.useEffect(function() {
@@ -917,7 +974,7 @@ export default function App() {
         )
       ),
       React.createElement("div", { style: { display: "flex", gap: 4 } },
-        [["pipeline","Pipeline"],["contacts","Contacts"],["reminders","Reminders" + (overdueTasks ? " !" : "")],["forecast","Forecast"]].map(function(pair) {
+        [["pipeline","Pipeline"],["contacts","Contacts"],["reminders","Reminders" + (overdueTasks ? " !" : "")],["goals","Goals"],["forecast","Forecast"]].map(function(pair) {
           var k = pair[0]; var label = pair[1];
           return React.createElement("button", { key: k, onClick: function() { setView(k); }, style: { background: view === k ? "#1e293b" : "none", border: "none", color: view === k ? "#f1f5f9" : "#64748b", borderRadius: 8, padding: "7px 13px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" } }, label);
         })
@@ -1121,6 +1178,160 @@ export default function App() {
             allTasks.length === 0 ? React.createElement("div", { style: { textAlign: "center", padding: "40px 0", color: "#334155", fontSize: 13 } }, "All caught up!") : null
           );
         })()
+      ) : null,
+
+      view === "goals" ? React.createElement("div", null,
+        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 } },
+          React.createElement("div", null,
+            React.createElement("div", { style: { fontWeight: 800, fontSize: 20, color: "#f1f5f9" } }, currentYear + " Goals"),
+            React.createElement("div", { style: { fontSize: 12, color: "#64748b", marginTop: 4 } }, "Track your annual and monthly progress")
+          ),
+          React.createElement("button", {
+            onClick: function() { setEditingGoals(!editingGoals); },
+            style: { background: editingGoals ? "#10b981" : "linear-gradient(135deg,#3b82f6,#6366f1)", color: "#fff", border: "none", borderRadius: 10, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }
+          }, editingGoals ? "Done" : "Edit Goals")
+        ),
+
+        // ── Annual Goals Cards ──────────────────────────────────────────────
+        (function() {
+          var closedThisYear = leads.filter(function(l) {
+            if (l.stage !== "Closed - Cap Year" && l.stage !== "Closed - Current Year") return false;
+            if (!l.closeDate) return false;
+            var d = new Date(l.closeDate);
+            return d.getFullYear() === currentYear;
+          });
+          var actualTransactions = closedThisYear.length;
+          var actualVolume = closedThisYear.reduce(function(s, l) { return s + parseBudget(l.budget); }, 0);
+          var actualIncome = closedThisYear.reduce(function(s, l) {
+            return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, l.agentReferralPaid, l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt);
+          }, 0);
+
+          var cards = [
+            { label: "Transactions", goal: goals.annual_transactions, actual: actualTransactions, key: "annual_transactions", color: "#3b82f6", icon: "🏠", isMoney: false },
+            { label: "Actual Income", goal: goals.annual_income, actual: actualIncome, key: "annual_income", color: "#10b981", icon: "🏦", isMoney: true },
+            { label: "Sales Volume", goal: goals.annual_volume, actual: actualVolume, key: "annual_volume", color: "#8b5cf6", icon: "📊", isMoney: true }
+          ];
+
+          return React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16, marginBottom: 24 } },
+            cards.map(function(c) {
+              var pct = c.goal > 0 ? Math.min(Math.round(c.actual / c.goal * 100), 100) : 0;
+              var over = c.goal > 0 && c.actual >= c.goal;
+              return React.createElement("div", { key: c.key, style: { background: "#0d1117", border: "1px solid " + c.color + "44", borderRadius: 16, padding: 20 } },
+                React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 } },
+                  React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+                    React.createElement("span", { style: { fontSize: 20 } }, c.icon),
+                    React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase" } }, c.label)
+                  ),
+                  over ? React.createElement("span", { style: { fontSize: 11, background: "#10b98120", color: "#10b981", padding: "3px 10px", borderRadius: 20, fontWeight: 700 } }, "GOAL MET!") : null
+                ),
+                editingGoals
+                  ? React.createElement("div", { style: { marginBottom: 10 } },
+                      React.createElement("div", { style: { fontSize: 11, color: "#64748b", marginBottom: 4 } }, "Annual Goal"),
+                      React.createElement("input", {
+                        type: "number",
+                        value: goals[c.key] || "",
+                        onChange: function(e) {
+                          var updated = Object.assign({}, goals);
+                          updated[c.key] = e.target.value;
+                          setGoals(updated);
+                        },
+                        onBlur: function() { saveGoals(goals); },
+                        placeholder: c.isMoney ? "e.g. 150000" : "e.g. 20",
+                        style: { width: "100%", background: "#111827", border: "1px solid #1e293b", borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 15, fontFamily: "inherit", boxSizing: "border-box" }
+                      })
+                    )
+                  : React.createElement("div", { style: { marginBottom: 10 } },
+                      React.createElement("div", { style: { fontSize: 28, fontWeight: 800, color: c.color } }, c.isMoney ? fmt(c.actual) : c.actual),
+                      c.goal > 0
+                        ? React.createElement("div", { style: { fontSize: 13, color: "#64748b", marginTop: 2 } }, "of " + (c.isMoney ? fmt(c.goal) : c.goal) + " goal")
+                        : React.createElement("div", { style: { fontSize: 13, color: "#334155", marginTop: 2 } }, "No goal set — tap Edit Goals")
+                    ),
+                c.goal > 0 ? React.createElement("div", null,
+                  React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 4 } },
+                    React.createElement("span", { style: { fontSize: 11, color: "#64748b" } }, pct + "% complete"),
+                    React.createElement("span", { style: { fontSize: 11, color: c.color, fontWeight: 700 } }, c.isMoney ? fmt(Math.max(c.goal - c.actual, 0)) + " to go" : Math.max(c.goal - c.actual, 0) + " to go")
+                  ),
+                  React.createElement("div", { style: { background: "#1e293b", borderRadius: 6, height: 8, overflow: "hidden" } },
+                    React.createElement("div", { style: { height: "100%", width: pct + "%", background: over ? "#10b981" : c.color, borderRadius: 6, transition: "width 0.5s" } })
+                  )
+                ) : null
+              );
+            })
+          );
+        })(),
+
+        // ── Monthly Breakdown ───────────────────────────────────────────────
+        React.createElement("div", { style: { background: "#0d1117", border: "1px solid #1e293b", borderRadius: 16, padding: 20 } },
+          React.createElement("div", { style: { fontWeight: 800, fontSize: 16, color: "#f1f5f9", marginBottom: 16 } }, "Monthly Breakdown"),
+          React.createElement("div", { style: { overflowX: "auto" } },
+            React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", minWidth: 700 } },
+              React.createElement("thead", null,
+                React.createElement("tr", null,
+                  React.createElement("th", { style: { textAlign: "left", padding: "8px 12px", fontSize: 11, color: "#64748b", fontWeight: 700, borderBottom: "1px solid #1e293b" } }, "MONTH"),
+                  React.createElement("th", { style: { textAlign: "center", padding: "8px 12px", fontSize: 11, color: "#3b82f6", fontWeight: 700, borderBottom: "1px solid #1e293b" } }, "TRANSACTIONS"),
+                  React.createElement("th", { style: { textAlign: "center", padding: "8px 12px", fontSize: 11, color: "#10b981", fontWeight: 700, borderBottom: "1px solid #1e293b" } }, "INCOME"),
+                  React.createElement("th", { style: { textAlign: "center", padding: "8px 12px", fontSize: 11, color: "#8b5cf6", fontWeight: 700, borderBottom: "1px solid #1e293b" } }, "VOLUME")
+                )
+              ),
+              React.createElement("tbody", null,
+                MONTHS.map(function(month, idx) {
+                  var monthLeads = leads.filter(function(l) {
+                    if (l.stage !== "Closed - Cap Year" && l.stage !== "Closed - Current Year") return false;
+                    if (!l.closeDate) return false;
+                    var d = new Date(l.closeDate);
+                    return d.getFullYear() === currentYear && d.getMonth() === idx;
+                  });
+                  var mActualTx = monthLeads.length;
+                  var mActualVol = monthLeads.reduce(function(s, l) { return s + parseBudget(l.budget); }, 0);
+                  var mActualInc = monthLeads.reduce(function(s, l) {
+                    return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, l.agentReferralPaid, l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt);
+                  }, 0);
+                  var mGoalTx = (goals.monthly_transactions && goals.monthly_transactions[idx]) || 0;
+                  var mGoalInc = (goals.monthly_income && goals.monthly_income[idx]) || 0;
+                  var mGoalVol = (goals.monthly_volume && goals.monthly_volume[idx]) || 0;
+                  var isPast = idx < currentMonth;
+                  var isCurrent = idx === currentMonth;
+                  var rowBg = isCurrent ? "#111827" : "transparent";
+
+                  function MonthCell(actual, goal, color, isMoney, gKey, mIdx) {
+                    if (editingGoals) {
+                      return React.createElement("td", { style: { textAlign: "center", padding: "8px 12px", borderBottom: "1px solid #0f172a" } },
+                        React.createElement("div", { style: { fontSize: 13, color: color, fontWeight: 700, marginBottom: 2 } }, isMoney ? fmt(actual) : actual),
+                        React.createElement("input", {
+                          type: "number",
+                          value: (goals[gKey] && goals[gKey][mIdx]) || "",
+                          onChange: function(e) {
+                            var updated = Object.assign({}, goals);
+                            updated[gKey] = Object.assign({}, updated[gKey] || {});
+                            updated[gKey][mIdx] = parseFloat(e.target.value) || 0;
+                            setGoals(updated);
+                          },
+                          onBlur: function() { saveGoals(goals); },
+                          placeholder: "goal",
+                          style: { width: 70, background: "#0d1117", border: "1px solid #334155", borderRadius: 6, color: "#94a3b8", padding: "4px 6px", fontSize: 11, textAlign: "center", fontFamily: "inherit" }
+                        })
+                      );
+                    }
+                    var met = goal > 0 && actual >= goal;
+                    return React.createElement("td", { style: { textAlign: "center", padding: "8px 12px", borderBottom: "1px solid #0f172a" } },
+                      React.createElement("div", { style: { fontSize: 14, color: met ? "#10b981" : color, fontWeight: 700 } }, (isMoney ? fmt(actual) : actual) + (met ? " ✓" : "")),
+                      goal > 0 ? React.createElement("div", { style: { fontSize: 11, color: "#475569" } }, "/ " + (isMoney ? fmt(goal) : goal)) : null
+                    );
+                  }
+
+                  return React.createElement("tr", { key: month, style: { background: rowBg } },
+                    React.createElement("td", { style: { padding: "8px 12px", borderBottom: "1px solid #0f172a", fontWeight: isCurrent ? 700 : 400, color: isCurrent ? "#f1f5f9" : isPast ? "#94a3b8" : "#475569", fontSize: 13 } },
+                      month + (isCurrent ? " ←" : "")
+                    ),
+                    MonthCell(mActualTx, mGoalTx, "#3b82f6", false, "monthly_transactions", idx),
+                    MonthCell(mActualInc, mGoalInc, "#10b981", true, "monthly_income", idx),
+                    MonthCell(mActualVol, mGoalVol, "#8b5cf6", true, "monthly_volume", idx)
+                  );
+                })
+              )
+            )
+          )
+        )
       ) : null,
 
       view === "forecast" ? React.createElement("div", null,
