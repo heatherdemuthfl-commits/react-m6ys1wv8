@@ -28,18 +28,92 @@ function loadFromLocal() {
 
 var SUPABASE_URL = "https://tjpjyltxxdoyfhtrxesu.supabase.co";
 var SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRqcGp5bHR4eGRveWZodHJ4ZXN1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwNjg2MDcsImV4cCI6MjA4OTY0NDYwN30.JTNgTmMOAECGS-aPbf-GusoKWbJ8AT1R0xA8lc13QRo";
-var sbHeaders = {
-  "Content-Type": "application/json",
-  "apikey": SUPABASE_KEY,
-  "Authorization": "Bearer " + SUPABASE_KEY,
-  "Prefer": "return=representation"
-};
+var SESSION_KEY = "re_pipeline_session";
+
+// ── SESSION ─────────────────────────────────────────────────────────────────
+// The anon key alone cannot read or write this database: row level security
+// grants access to signed-in users only. Without a session every write is
+// silently dropped, which is how eight weeks of changes went missing.
+var session = null;
+try {
+  var rawSession = localStorage.getItem(SESSION_KEY);
+  if (rawSession) session = JSON.parse(rawSession);
+} catch (e) { session = null; }
+
+function storeSession(s) {
+  session = s;
+  try {
+    if (s) localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+    else localStorage.removeItem(SESSION_KEY);
+  } catch (e) {}
+}
+function nowSec() { return Math.floor(Date.now() / 1000); }
+function haveSession() { return !!(session && session.access_token); }
+function sessionEmail() { return (session && session.email) || ""; }
+
+function authJson(r) {
+  return r.json().then(function(d) {
+    if (!r.ok) throw new Error(d.error_description || d.msg || d.error || ("HTTP " + r.status));
+    return d;
+  });
+}
+function adoptToken(d, email) {
+  storeSession({
+    access_token: d.access_token,
+    refresh_token: d.refresh_token,
+    expires_at: nowSec() + (d.expires_in || 3600),
+    email: (d.user && d.user.email) || email || sessionEmail()
+  });
+  return session;
+}
+function signIn(email, password) {
+  return fetch(SUPABASE_URL + "/auth/v1/token?grant_type=password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "apikey": SUPABASE_KEY },
+    body: JSON.stringify({ email: email, password: password })
+  }).then(authJson).then(function(d) { return adoptToken(d, email); });
+}
+function signOut() { storeSession(null); }
+
+var refreshInFlight = null;
+function refreshSession() {
+  if (!session || !session.refresh_token) return Promise.reject(new Error("NOT_SIGNED_IN"));
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = fetch(SUPABASE_URL + "/auth/v1/token?grant_type=refresh_token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "apikey": SUPABASE_KEY },
+    body: JSON.stringify({ refresh_token: session.refresh_token })
+  }).then(authJson).then(function(d) {
+    refreshInFlight = null;
+    return adoptToken(d);
+  }).catch(function(err) {
+    refreshInFlight = null;
+    storeSession(null);
+    throw err;
+  });
+  return refreshInFlight;
+}
+function ensureToken() {
+  if (!haveSession()) return Promise.reject(new Error("NOT_SIGNED_IN"));
+  if (session.expires_at && session.expires_at > nowSec() + 60) return Promise.resolve();
+  return refreshSession();
+}
+
 function sbFetch(path, options) {
-  var merged = Object.assign({ headers: sbHeaders }, options || {});
-  if (merged.headers !== sbHeaders) {
-    merged.headers = Object.assign({}, sbHeaders, merged.headers);
-  }
-  return fetch(SUPABASE_URL + "/rest/v1/" + path, merged).then(function(r) {
+  return ensureToken().then(function() {
+    var merged = Object.assign({}, options || {});
+    merged.headers = Object.assign({
+      "Content-Type": "application/json",
+      "apikey": SUPABASE_KEY,
+      "Authorization": "Bearer " + session.access_token,
+      "Prefer": "return=representation"
+    }, (options && options.headers) || {});
+    return fetch(SUPABASE_URL + "/rest/v1/" + path, merged);
+  }).then(function(r) {
+    if (r.status === 401 || r.status === 403) {
+      storeSession(null);
+      throw new Error("Your sign-in expired. Sign in again to keep saving.");
+    }
     if (!r.ok) {
       return r.text().then(function(body) {
         console.error("Supabase error " + r.status + " on " + path + ":", body);
@@ -48,6 +122,18 @@ function sbFetch(path, options) {
     }
     return r;
   });
+}
+
+// A PATCH that matches no rows returns 200 with an empty array rather than an
+// error. Treating that as success is what made failed saves invisible.
+function requireSavedRow(what) {
+  return function(data) {
+    var rows = Array.isArray(data) ? data : (data ? [data] : []);
+    if (rows.length === 0) {
+      throw new Error(what + " was NOT saved: the database accepted the request but changed nothing. Sign out and back in, then try again.");
+    }
+    return rows[0];
+  };
 }
 function dbToLead(r) {
   return {
@@ -128,9 +214,7 @@ function insertLeadToDB(lead) {
     body: JSON.stringify(payload)
   }).then(function(r) {
     return r.json();
-  }).then(function(data) {
-    return Array.isArray(data) ? data[0] : data;
-  });
+  }).then(requireSavedRow("New lead"));
 }
 function updateLeadInDB(dbId, lead) {
   var payload = leadToPayload(lead);
@@ -140,12 +224,10 @@ function updateLeadInDB(dbId, lead) {
     body: JSON.stringify(payload)
   }).then(function(r) {
     return r.json();
-  }).then(function(data) {
-    return Array.isArray(data) ? data[0] : data;
-  });
+  }).then(requireSavedRow("That change"));
 }
 function deleteLeadFromDB(dbId) {
-  return sbFetch("leads?db_id=eq." + dbId, { method: "DELETE" }).catch(function() {});
+  return sbFetch("leads?db_id=eq." + dbId, { method: "DELETE" });
 }
 
 const parseBudget = (n) => { if (!n && n !== 0) return 0; var s = String(n).replace(/[$,\s]/g, ""); return parseFloat(s) || 0; };
@@ -657,7 +739,84 @@ function LeadCard(props) {
   );
 }
 
+// ── SIGN IN SCREEN ──────────────────────────────────────────────────────────
+function SignIn(props) {
+  var emailState = React.useState(""); var email = emailState[0]; var setEmail = emailState[1];
+  var pwState = React.useState(""); var pw = pwState[0]; var setPw = pwState[1];
+  var busyState = React.useState(false); var busy = busyState[0]; var setBusy = busyState[1];
+  var errState = React.useState(""); var err = errState[0]; var setErr = errState[1];
+
+  function submit(e) {
+    if (e) e.preventDefault();
+    if (!email.trim() || !pw) { setErr("Enter your email and password."); return; }
+    setBusy(true); setErr("");
+    signIn(email.trim(), pw)
+      .then(function() { setBusy(false); props.onSignedIn(); })
+      .catch(function(error) {
+        setBusy(false);
+        setErr(error.message === "Invalid login credentials"
+          ? "That email and password did not match. Reset your password in Supabase if you need to."
+          : (error.message || "Sign in failed."));
+      });
+  }
+
+  var inputStyle = {
+    width: "100%", padding: "12px 14px", marginTop: 6, boxSizing: "border-box",
+    background: "#0b1220", border: "1px solid #1e293b", borderRadius: 8,
+    color: "#f1f5f9", fontSize: 15, fontFamily: "inherit"
+  };
+  var labelStyle = { display: "block", fontSize: 13, color: "#94a3b8", marginTop: 18 };
+
+  return React.createElement("div", {
+    style: {
+      minHeight: "100vh", background: "#060b14", color: "#f1f5f9",
+      fontFamily: "'Segoe UI',sans-serif", display: "flex",
+      alignItems: "center", justifyContent: "center", padding: 20
+    }
+  },
+    React.createElement("form", {
+      onSubmit: submit,
+      style: {
+        width: "100%", maxWidth: 400, background: "#0a1120",
+        border: "1px solid #1e293b", borderRadius: 14, padding: 32
+      }
+    },
+      React.createElement("div", { style: { fontSize: 22, fontWeight: 600 } }, "Pipeline Pro"),
+      React.createElement("div", { style: { fontSize: 14, color: "#94a3b8", marginTop: 8, lineHeight: 1.5 } },
+        "Sign in to load and save your pipeline. Without signing in, nothing saves to the cloud."),
+      React.createElement("label", { style: labelStyle }, "Email",
+        React.createElement("input", {
+          type: "email", value: email, autoComplete: "username", autoFocus: true,
+          onChange: function(e) { setEmail(e.target.value); }, style: inputStyle
+        })
+      ),
+      React.createElement("label", { style: labelStyle }, "Password",
+        React.createElement("input", {
+          type: "password", value: pw, autoComplete: "current-password",
+          onChange: function(e) { setPw(e.target.value); }, style: inputStyle
+        })
+      ),
+      err ? React.createElement("div", {
+        style: {
+          marginTop: 16, padding: "10px 12px", borderRadius: 8, fontSize: 13,
+          background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.4)", color: "#fca5a5"
+        }
+      }, err) : null,
+      React.createElement("button", {
+        type: "submit", disabled: busy,
+        style: {
+          width: "100%", marginTop: 24, padding: "13px 0", borderRadius: 8, border: "none",
+          background: busy ? "#334155" : "#10b981", color: "#fff", fontSize: 15,
+          fontWeight: 600, cursor: busy ? "default" : "pointer", fontFamily: "inherit"
+        }
+      }, busy ? "Signing in..." : "Sign in")
+    )
+  );
+}
+
 export default function App() {
+  var signedInState = React.useState(haveSession());
+  var signedIn = signedInState[0]; var setSignedIn = signedInState[1];
   var leadsState = React.useState([]);
   var leads = leadsState[0]; var setLeads = leadsState[1];
   var loadedState = React.useState(false); var loaded = loadedState[0]; var setLoaded = loadedState[1];
@@ -691,39 +850,43 @@ export default function App() {
   var dragLeadState = React.useState(null); var dragLead = dragLeadState[0]; var setDragLead = dragLeadState[1];
   var dragOverState = React.useState(null); var dragOver = dragOverState[0]; var setDragOver = dragOverState[1];
 
-  // ── LOAD: always try Supabase first, fall back to localStorage ────────────
+  // ── LOAD from Supabase. The cloud is the source of truth; localStorage is
+  // only a read-only safety copy. We never silently run local-only again.
   React.useEffect(function() {
+    if (!signedIn) return;
+    setDbStatus("connecting");
     sbFetch("leads?select=*&order=created_at.desc")
       .then(function(r) {
         return r.json();
       })
       .then(function(data) {
-        if (Array.isArray(data)) {
-          setDbStatus("connected");
-          if (data.length > 0) {
-            var mapped = data.map(dbToLead);
-            setLeads(mapped);
-            saveToLocal(mapped);
-          } else {
-            var local = loadFromLocal();
-            if (local && local.length > 0) {
-              setLeads(local);
-              local.forEach(function(l) { insertLeadToDB(l).catch(function(){}); });
-            }
-          }
-        } else {
-          throw new Error("Not an array");
+        if (!Array.isArray(data)) throw new Error("Unexpected response from database");
+        if (data.length === 0) {
+          // Do not quietly treat an empty cloud as healthy, and do not
+          // overwrite the local copy with nothing.
+          var local = loadFromLocal();
+          if (local && local.length > 0) setLeads(local);
+          setDbStatus("cloud-empty");
+          setDbError("The cloud has no records but this browser has " + ((local && local.length) || 0) + ". Nothing was overwritten. Check that you are signed in as the right account before making changes.");
+          setLoaded(true);
+          return;
         }
+        var mapped = data.map(dbToLead);
+        setLeads(mapped);
+        saveToLocal(mapped);
+        setDbStatus("connected");
+        setDbError("");
         setLoaded(true);
       })
       .catch(function(err) {
-        console.error("Supabase load failed:", err); setDbError(err.message || "Unknown error");
+        console.error("Supabase load failed:", err);
+        setDbError(err.message || "Unknown error");
         setDbStatus("offline");
         var local3 = loadFromLocal();
         if (local3) setLeads(local3);
         setLoaded(true);
       });
-  }, []);
+  }, [signedIn]);
 
   // ── Always save to localStorage as backup ─────────────────────────────────
   React.useEffect(function() {
@@ -732,6 +895,7 @@ export default function App() {
 
   // ── Load goals from Supabase ──────────────────────────────────────────────
   React.useEffect(function() {
+    if (!signedIn) return;
     sbFetch("goals?year=eq." + currentYear + "&select=*")
       .then(function(r) { return r.json(); })
       .then(function(data) {
@@ -749,7 +913,7 @@ export default function App() {
         }
       })
       .catch(function(err) { console.error("Goals load failed:", err); });
-  }, []);
+  }, [signedIn]);
 
   function saveGoals(updatedGoals) {
     setGoals(updatedGoals);
@@ -793,7 +957,11 @@ export default function App() {
         return prev.map(function(l) {
           if (toArchive.find(function(a) { return a.id === l.id; })) {
             var updated = Object.assign({}, l, { stage: "Closed" });
-            if (updated.db_id) updateLeadInDB(updated.db_id, updated).catch(function(){});
+            if (updated.db_id) updateLeadInDB(updated.db_id, updated).catch(function(err) {
+              console.error("Cap-year archive save failed:", err);
+              setDbStatus("save-error");
+              setDbError(err.message || "Unknown error");
+            });
             return updated;
           }
           return l;
@@ -965,19 +1133,52 @@ export default function App() {
 
   var iStyle = { width: "100%", background: "#111827", border: "1px solid #1e293b", borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" };
 
+  // ── SIGN IN GATE ──────────────────────────────────────────────────────────
+  if (!signedIn) {
+    return React.createElement(SignIn, {
+      onSignedIn: function() { setSignedIn(true); }
+    });
+  }
+
   // ── DB status indicator colors ────────────────────────────────────────────
-  var statusColor = dbStatus === "connected" ? "#10b981" : dbStatus === "connecting" ? "#f59e0b" : dbStatus === "save-error" ? "#ef4444" : "#ef4444";
-  var statusText = dbStatus === "connected" ? (saving ? "Saving..." : "Cloud Synced") : dbStatus === "connecting" ? "Connecting..." : dbStatus === "save-error" ? ("Save failed" + (dbError ? ": " + dbError.substring(0, 60) : "")) : ("Offline" + (dbError ? ": " + dbError.substring(0, 60) : ""));
+  var statusColor = dbStatus === "connected" ? "#10b981"
+    : dbStatus === "connecting" ? "#f59e0b"
+    : "#ef4444";
+  var statusText = dbStatus === "connected" ? (saving ? "Saving..." : "Cloud Synced")
+    : dbStatus === "connecting" ? "Connecting..."
+    : dbStatus === "save-error" ? ("NOT SAVED" + (dbError ? ": " + dbError.substring(0, 80) : ""))
+    : dbStatus === "cloud-empty" ? "Cloud is empty, nothing overwritten"
+    : ("Offline, changes are NOT saving" + (dbError ? ": " + dbError.substring(0, 60) : ""));
 
   return React.createElement("div", { style: { minHeight: "100vh", background: "#060b14", fontFamily: "'Segoe UI',sans-serif", color: "#f1f5f9" } },
+    (dbStatus === "save-error" || dbStatus === "offline" || dbStatus === "cloud-empty") ? React.createElement("div", {
+      style: {
+        background: "rgba(239,68,68,0.15)", borderBottom: "1px solid rgba(239,68,68,0.5)",
+        color: "#fca5a5", padding: "11px 24px", fontSize: 13, display: "flex",
+        alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap"
+      }
+    },
+      React.createElement("span", null,
+        dbStatus === "cloud-empty" ? dbError : ("Your changes are not reaching the cloud. " + (dbError || ""))),
+      React.createElement("button", {
+        onClick: function() { signOut(); setSignedIn(false); },
+        style: { padding: "6px 12px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.5)", background: "transparent", color: "#fca5a5", fontSize: 12, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }
+      }, "Sign in again")
+    ) : null,
     React.createElement("div", { style: { borderBottom: "1px solid #1e293b", padding: "14px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#0d1117", flexWrap: "wrap", gap: 10 } },
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
         React.createElement("div", { style: { width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg,#3b82f6,#6366f1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 } }, "🏡"),
         React.createElement("div", null,
           React.createElement("div", { style: { fontWeight: 800, fontSize: 18, color: "#f8fafc" } }, "Pipeline Pro"),
-          React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
+          React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" } },
             React.createElement("div", { style: { width: 6, height: 6, borderRadius: "50%", background: statusColor } }),
-            React.createElement("span", { style: { fontSize: 11, color: statusColor } }, statusText)
+            React.createElement("span", { style: { fontSize: 11, color: statusColor } }, statusText),
+            React.createElement("span", { style: { fontSize: 11, color: "#475569" } }, "·"),
+            React.createElement("span", { style: { fontSize: 11, color: "#64748b" } }, sessionEmail()),
+            React.createElement("button", {
+              onClick: function() { signOut(); setSignedIn(false); },
+              style: { background: "none", border: "none", padding: 0, fontSize: 11, color: "#64748b", textDecoration: "underline", cursor: "pointer", fontFamily: "inherit" }
+            }, "Sign out")
           )
         )
       ),
