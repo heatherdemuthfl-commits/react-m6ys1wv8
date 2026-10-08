@@ -678,7 +678,17 @@ export default function App() {
   var currentYear = new Date().getFullYear();
   var currentMonth = new Date().getMonth();
   var defaultGoals = { annual_transactions: 0, annual_income: 0, annual_volume: 0, monthly_transactions: {}, monthly_income: {}, monthly_volume: {} };
-  var goalsState = React.useState(defaultGoals);
+  // Goals are kept in this browser so they survive a reload even when the
+  // cloud database refuses the save (it requires a signed-in user).
+  var GOALS_KEY = "re_pipeline_goals_" + currentYear;
+  function loadGoalsLocal() {
+    try {
+      var raw = localStorage.getItem(GOALS_KEY);
+      if (raw) { var g = JSON.parse(raw); if (g && typeof g === "object") return Object.assign({}, defaultGoals, g); }
+    } catch (e) {}
+    return null;
+  }
+  var goalsState = React.useState(function() { return loadGoalsLocal() || defaultGoals; });
   var goals = goalsState[0]; var setGoals = goalsState[1];
   var goalsDbId = React.useState(null);
   var goalsId = goalsDbId[0]; var setGoalsId = goalsDbId[1];
@@ -730,6 +740,11 @@ export default function App() {
     if (loaded) saveToLocal(leads);
   }, [leads, loaded]);
 
+  // ── Keep a local copy of goals on every change ───────────────────────────
+  React.useEffect(function() {
+    try { localStorage.setItem(GOALS_KEY, JSON.stringify(goals)); } catch (e) {}
+  }, [goals]);
+
   // ── Load goals from Supabase ──────────────────────────────────────────────
   React.useEffect(function() {
     sbFetch("goals?year=eq." + currentYear + "&select=*")
@@ -753,6 +768,7 @@ export default function App() {
 
   function saveGoals(updatedGoals) {
     setGoals(updatedGoals);
+    try { localStorage.setItem(GOALS_KEY, JSON.stringify(updatedGoals)); } catch (e) {}
     var payload = {
       year: currentYear,
       annual_transactions: parseInt(updatedGoals.annual_transactions) || 0,
