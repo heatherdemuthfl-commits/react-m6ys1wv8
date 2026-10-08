@@ -895,12 +895,16 @@ export default function App() {
   }, 0);
 
   var currentCapYear = now.getMonth() >= CAP_START_MONTH ? now.getFullYear() : now.getFullYear() - 1;
+  // Cap year runs Oct 1 to Sep 30. The close date decides which cap year a
+  // deal counts toward, so the cap resets to $0 every October 1.
   var capYearLeads = closedLeads.filter(function(l) {
+    if (l.closeDate) {
+      var d = new Date(l.closeDate + "T12:00:00");
+      if (!isNaN(d)) return d >= capYearStart;
+    }
     if (l.stage === "Closed - Cap Year") return true;
-    if (l.closedYear) return parseInt(l.closedYear) === currentCapYear || parseInt(l.closedYear) === currentCapYear + 1;
-    if (!l.closeDate) return true;
-    var d = new Date(l.closeDate);
-    return d >= capYearStart;
+    if (l.closedYear) return parseInt(l.closedYear) === currentCapYear + 1;
+    return false;
   });
 
   var calYearLeads = closedLeads.filter(function(l) {
