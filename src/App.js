@@ -80,6 +80,7 @@ function dbToLead(r) {
     brokerageFee: r.brokerage_fee || false,
     adminFee: r.admin_fee || false,
     agentReferralPaid: r.agent_referral_paid || 0,
+    agentReferralPct: r.agent_referral_pct || 0,
     commissionBonus: r.commission_bonus || 0,
     incomingReferral: r.incoming_referral || 0,
     referralOnly: r.referral_only || false,
@@ -114,6 +115,7 @@ function leadToPayload(lead) {
     brokerage_fee: lead.brokerageFee || false,
     admin_fee: lead.adminFee || false,
     agent_referral_paid: parseFloat(lead.agentReferralPaid) || 0,
+    agent_referral_pct: parseFloat(lead.agentReferralPct) || 0,
     commission_bonus: parseFloat(lead.commissionBonus) || 0,
     incoming_referral: parseFloat(lead.incomingReferral) || 0,
     referral_only: lead.referralOnly || false,
@@ -153,6 +155,19 @@ function deleteLeadFromDB(dbId) {
 const parseBudget = (n) => { if (!n && n !== 0) return 0; var s = String(n).replace(/[$,\s]/g, ""); return parseFloat(s) || 0; };
 const fmt = (n) => { var v = parseBudget(n); return v ? "$" + v.toLocaleString() : "—"; };
 const calcCommission = (budget, commission) => { var b = parseBudget(budget); var c = parseFloat(commission) || 0; return b && c ? (b * c / 100) : 0; };
+
+// Referral paid to another agent: 25% or 30% of the commission, or a dollar
+// amount entered on older deals before the percentage choice existed.
+const referralOut = (l) => {
+  var pct = parseFloat(l.agentReferralPct) || 0;
+  if (pct > 0) {
+    var gross = l.referralOnly
+      ? (parseFloat(l.incomingReferral) || 0)
+      : calcCommission(l.budget, l.commission) + (parseFloat(l.commissionBonus) || 0) + (parseFloat(l.incomingReferral) || 0);
+    return Math.round(gross * pct) / 100;
+  }
+  return parseFloat(l.agentReferralPaid) || 0;
+};
 
 const ADMIN_FEE = 495; // client-paid admin fee in Heather's agreements
 
@@ -547,8 +562,25 @@ function LeadModal(props) {
                 React.createElement("input", { value: ed.incomingReferral || "", onChange: function(e) { set("incomingReferral", e.target.value); }, placeholder: "0", style: { width: 100, background: "#111827", border: "1px solid #1e293b", borderRadius: 8, color: "#f1f5f9", padding: "5px 10px", fontSize: 13, fontFamily: "inherit" } })
               ),
               React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
-                React.createElement("span", { style: { fontSize: 13, color: "#f1f5f9", flex: 1 } }, "Agent Referral Paid Out ($)"),
-                React.createElement("input", { value: ed.agentReferralPaid || "", onChange: function(e) { set("agentReferralPaid", e.target.value); }, placeholder: "0", style: { width: 100, background: "#111827", border: "1px solid #1e293b", borderRadius: 8, color: "#f1f5f9", padding: "5px 10px", fontSize: 13, fontFamily: "inherit" } })
+                React.createElement("span", { style: { fontSize: 13, color: "#f1f5f9", flex: 1 } }, "Agent Referral Paid Out"),
+                referralOut(ed) > 0 ? React.createElement("span", { style: { fontSize: 12, color: "#f87171" } }, "-" + fmt(referralOut(ed))) : null,
+                React.createElement("select", {
+                  value: (parseFloat(ed.agentReferralPct) || 0) > 0 ? String(parseFloat(ed.agentReferralPct)) : ((parseFloat(ed.agentReferralPaid) || 0) > 0 ? "legacy" : "0"),
+                  onChange: function(e) {
+                    var v = e.target.value;
+                    if (v === "legacy") return;
+                    set("agentReferralPct", parseFloat(v));
+                    set("agentReferralPaid", 0);
+                  },
+                  style: { background: "#111827", border: "1px solid #1e293b", borderRadius: 8, color: "#f1f5f9", padding: "5px 10px", fontSize: 13, fontFamily: "inherit" }
+                },
+                  React.createElement("option", { value: "0" }, "None"),
+                  React.createElement("option", { value: "25" }, "25%"),
+                  React.createElement("option", { value: "30" }, "30%"),
+                  (!(parseFloat(ed.agentReferralPct) > 0) && (parseFloat(ed.agentReferralPaid) || 0) > 0)
+                    ? React.createElement("option", { value: "legacy" }, fmt(ed.agentReferralPaid) + " (entered before)")
+                    : null
+                )
               ),
               React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
                 React.createElement("span", { style: { fontSize: 13, color: "#f1f5f9", flex: 1 } }, "Commission Bonus ($)"),
@@ -568,7 +600,7 @@ function LeadModal(props) {
             React.createElement("div", { style: { background: "#0d1117", borderRadius: 8, padding: "10px 14px", display: "flex", justifyContent: "space-between", marginTop: 4 } },
               React.createElement("span", { style: { fontSize: 13, color: "#64748b" } }, "Actual income (after split & fees)"),
               React.createElement("span", { style: { fontSize: 14, fontWeight: 800, color: "#10b981" } },
-                fmt(calcActualIncome(ed.budget, ed.commission, ed.applyplit, ed.splitPaid, ed.otherFees, ed.cbrFee, ed.transactionFee, ed.tcFee, ed.preCapEquity, ed.brokerageFee, ed.agentReferralPaid, ed.commissionBonus, ed.incomingReferral, ed.referralOnly, ed.customSplitAmt, ed.adminFee))
+                fmt(calcActualIncome(ed.budget, ed.commission, ed.applyplit, ed.splitPaid, ed.otherFees, ed.cbrFee, ed.transactionFee, ed.tcFee, ed.preCapEquity, ed.brokerageFee, referralOut(ed), ed.commissionBonus, ed.incomingReferral, ed.referralOnly, ed.customSplitAmt, ed.adminFee))
               )
             )
           ),
@@ -704,7 +736,7 @@ export default function App() {
   var goalsId = goalsDbId[0]; var setGoalsId = goalsDbId[1];
   var editingGoalsState = React.useState(false); var editingGoals = editingGoalsState[0]; var setEditingGoals = editingGoalsState[1];
 
-  var emptyLead = { name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr(),closeDate:"",closedYear:"",applyplit:false,customSplitAmt:"",splitPaid:0,otherFees:0,cbrFee:false,transactionFee:false,tcFee:0,preCapEquity:0,brokerageFee:false,adminFee:false,agentReferralPaid:0,commissionBonus:0,incomingReferral:0,referralOnly:false,referralFrom:"" };
+  var emptyLead = { name:"",phone:"",email:"",stage:"New Lead",type:"Buyer",propertyInterest:"",budget:"",commission:3,source:"",notes:"",lastContact:todayStr(),closeDate:"",closedYear:"",applyplit:false,customSplitAmt:"",splitPaid:0,otherFees:0,cbrFee:false,transactionFee:false,tcFee:0,preCapEquity:0,brokerageFee:false,adminFee:false,agentReferralPaid:0,agentReferralPct:0,commissionBonus:0,incomingReferral:0,referralOnly:false,referralFrom:"" };
   var newLeadState = React.useState(emptyLead);
   var newLead = newLeadState[0]; var setNewLead = newLeadState[1];
 
@@ -917,7 +949,7 @@ export default function App() {
   var earnedIncome = closedLeads.reduce(function(s,l) { return s + calcCommission(l.budget, l.commission) + (parseFloat(l.commissionBonus) || 0) + (parseFloat(l.incomingReferral) || 0); }, 0);
 
   var actualEarned = closedLeads.reduce(function(s,l) {
-    return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, l.agentReferralPaid, l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt, l.adminFee);
+    return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, referralOut(l), l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt, l.adminFee);
   }, 0);
 
   var currentCapYear = now.getMonth() >= CAP_START_MONTH ? now.getFullYear() : now.getFullYear() - 1;
@@ -942,14 +974,14 @@ export default function App() {
 
   var calYearRevenue = calYearLeads.reduce(function(s,l) { return s + parseBudget(l.budget); }, 0);
   var calYearActual = calYearLeads.reduce(function(s,l) {
-    return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, l.agentReferralPaid, l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt, l.adminFee);
+    return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, referralOut(l), l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt, l.adminFee);
   }, 0);
 
   var totalSplitPaid = capYearLeads.reduce(function(s,l) {
     var gross = l.referralOnly
       ? (parseFloat(l.incomingReferral) || 0)
       : calcCommission(l.budget, l.commission) + (parseFloat(l.commissionBonus) || 0) + (parseFloat(l.incomingReferral) || 0);
-    var netBeforeSplit = gross - (parseFloat(l.agentReferralPaid) || 0);
+    var netBeforeSplit = gross - referralOut(l);
     var splitAmt = l.applyplit
       ? (parseFloat(l.customSplitAmt) > 0
           ? parseFloat(l.customSplitAmt)
@@ -964,7 +996,7 @@ export default function App() {
   var ucLeads = leads.filter(function(l) { return ucStages.indexOf(l.stage) !== -1; });
   var ucGross = ucLeads.reduce(function(s,l) { return s + calcCommission(l.budget, l.commission) + (parseFloat(l.commissionBonus) || 0) + (parseFloat(l.incomingReferral) || 0); }, 0);
   var ucNet = ucLeads.reduce(function(s,l) {
-    return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, l.agentReferralPaid, l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt, l.adminFee);
+    return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, referralOut(l), l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt, l.adminFee);
   }, 0);
 
   var allActive = leads.filter(function(l) { return l.stage !== "Lost"; });
@@ -1130,7 +1162,7 @@ export default function App() {
       ),
       React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 8 } },
         ucLeads.map(function(l) {
-          var ucDealNet = calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, l.agentReferralPaid, l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt, l.adminFee);
+          var ucDealNet = calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, referralOut(l), l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt, l.adminFee);
           return React.createElement("div", { key: (l.db_id || l.name) + l.stage, style: { background: "#1e293b", borderRadius: 8, padding: "6px 12px", fontSize: 12, color: "#cbd5e1" } },
             React.createElement("span", { style: { fontWeight: 700, color: "#f1f5f9" } }, l.name),
             React.createElement("span", { style: { color: "#64748b" } }, " · " + l.stage + " · "),
@@ -1258,7 +1290,7 @@ export default function App() {
           var actualTransactions = closedThisYear.filter(function(l) { return !l.referralOnly; }).length;
           var actualVolume = closedThisYear.filter(function(l) { return !l.referralOnly; }).reduce(function(s, l) { return s + parseBudget(l.budget); }, 0);
           var actualIncome = closedThisYear.reduce(function(s, l) {
-            return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, l.agentReferralPaid, l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt, l.adminFee);
+            return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, referralOut(l), l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt, l.adminFee);
           }, 0);
 
           var cards = [
@@ -1339,7 +1371,7 @@ export default function App() {
                   var mActualTx = monthLeads.filter(function(l) { return !l.referralOnly; }).length;
                   var mActualVol = monthLeads.filter(function(l) { return !l.referralOnly; }).reduce(function(s, l) { return s + parseBudget(l.budget); }, 0);
                   var mActualInc = monthLeads.reduce(function(s, l) {
-                    return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, l.agentReferralPaid, l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt, l.adminFee);
+                    return s + calcActualIncome(l.budget, l.commission, l.applyplit, l.splitPaid, l.otherFees, l.cbrFee, l.transactionFee, l.tcFee, l.preCapEquity, l.brokerageFee, referralOut(l), l.commissionBonus, l.incomingReferral, l.referralOnly, l.customSplitAmt, l.adminFee);
                   }, 0);
                   var mGoalTx = (goals.monthly_transactions && goals.monthly_transactions[idx]) || 0;
                   var mGoalInc = (goals.monthly_income && goals.monthly_income[idx]) || 0;
