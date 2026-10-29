@@ -187,7 +187,7 @@ const calcActualIncome = (budget, commission, applyplit, splitPaid, otherFees, c
     + (transactionFee ? 285 : 0)
     + (parseFloat(tcFee) || 0)
     + (parseFloat(preCapEquity) || 0)
-    + (brokerageFee ? 250 : 0);
+    + (brokerageFee ? 300 : 0);
   return Math.max(netBeforeSplit - splitAmt - otherFeeTotal, 0) + adminFeeAmt;
 };
 
@@ -530,7 +530,7 @@ function LeadModal(props) {
               React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
                 React.createElement("input", { type: "checkbox", checked: ed.brokerageFee || false, onChange: function(e) { set("brokerageFee", e.target.checked); }, style: { accentColor: "#10b981", width: 16, height: 16, cursor: "pointer" } }),
                 React.createElement("span", { style: { fontSize: 13, color: "#f1f5f9", flex: 1 } }, "Brokerage Fee"),
-                React.createElement("span", { style: { fontSize: 12, color: "#64748b" } }, ed.brokerageFee ? "-$250" : "$250")
+                React.createElement("span", { style: { fontSize: 12, color: "#64748b" } }, ed.brokerageFee ? "-$300" : "$300")
               ),
               React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
                 React.createElement("input", { type: "checkbox", checked: ed.adminFee || false, onChange: function(e) { set("adminFee", e.target.checked); }, style: { accentColor: "#10b981", width: 16, height: 16, cursor: "pointer" } }),
